@@ -13,6 +13,13 @@ orientation = portrait
 fullscreen = 0
 
 android.permissions = INTERNET
+android.api = 31
+android.minapi = 24
+android.ndk = 25b
+android.archs = arm64-v8a
+
+p4a.branch = master
+p4a.python_version = 3.11
 
 [buildozer]
 log_level = 2
