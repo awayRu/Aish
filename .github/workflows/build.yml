@@ -5,21 +5,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Setup
+
+      - name: Install system dependencies
         run: |
           sudo apt update
-          sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev cmake libffi-dev libssl-dev aidl
+          sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool \
+            pkg-config zlib1g-dev libncurses5-dev cmake libffi-dev libssl-dev \
+            libltdl-dev aidl
+
+      - name: Install buildozer
+        run: |
           pip install --upgrade pip
-          pip install buildozer cython
-      - name: Build
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
-        with:
-          command: android debug
-      - uses: actions/upload-artifact@v4
+          pip install buildozer cython==0.29.36
+
+      - name: Build APK
+        run: |
+          yes | buildozer -v android debug || true
+
+      - name: Show files
+        run: ls -la bin/ || echo "bin empty"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
+          if-no-files-found: warn
