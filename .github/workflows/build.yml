@@ -25,14 +25,20 @@ jobs:
 
       - name: Build APK
         run: |
-          yes | buildozer -v android debug || true
+          yes | buildozer -v android debug
 
-      - name: Show files
-        run: ls -la bin/ || echo "bin empty"
+      - name: Find APK
+        run: |
+          echo "=== Looking for APK ==="
+          find . -name "*.apk" -type f
+          echo "=== bin/ contents ==="
+          ls -la bin/ || echo "no bin dir"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: bin/*.apk
-          if-no-files-found: warn
+          path: |
+            bin/*.apk
+            **/*.apk
+          if-no-files-found: error
