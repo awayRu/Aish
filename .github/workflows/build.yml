@@ -11,7 +11,7 @@ jobs:
 
       - name: Build APK
         run: |
-          buildozer -v android debug 2>&1 | tee buildozer_output.txt
+          yes | buildozer -v android debug 2>&1 | tee buildozer_output.txt
         continue-on-error: true
 
       - name: Show errors
