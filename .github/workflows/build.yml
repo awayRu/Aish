@@ -1,8 +1,11 @@
 name: Build
+
 on: [push, workflow_dispatch]
+
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - uses: actions/checkout@v4
 
@@ -12,39 +15,44 @@ jobs:
 
       - name: Install system packages
         run: |
-          sudo apt update
-          sudo apt install -y \
+          sudo apt-get update
+          sudo apt-get install -y \
             git zip unzip \
             openjdk-17-jdk-headless \
             autoconf automake libtool libtool-bin \
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
             cmake libffi-dev libssl-dev libltdl-dev aidl ant
 
-      - name: Install buildozer + legacy-cgi
+      - name: Install Buildozer
         run: |
-          pip install --upgrade pip setuptools wheel
-          pip install buildozer cython==0.29.36 virtualenv legacy-cgi
-          python -c "import cgi; print('cgi OK')"
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install buildozer cython==0.29.36 virtualenv legacy-cgi
 
       - name: Build APK
-        env:
-          PIP_NO_BUILD_ISOLATION: "1"
         run: |
-          set -eo pipefail
-          yes | buildozer -v android debug
-        continue-on-error: true
+          set -o pipefail
+          buildozer -v android debug 2>&1 | tee buildozer_output.txt
 
-      - name: Show errors
+      - name: Show build log
         if: always()
         run: |
-          echo "=== Tail of buildozer.log ==="
-          tail -60 .buildozer/android/platform/build-arm64-v8a/build/output.txt 2>/dev/null || echo "no log"
-          echo "=== APK search ==="
-          find . -name "*.apk" -type f
+          echo "=== LAST 100 LINES ==="
+          tail -100 buildozer_output.txt || true
+          echo "=== APK FILES ==="
+          find . -type f -name "*.apk" -print
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload full log
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-log
+          path: buildozer_output.txt
+          if-no-files-found: warn
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
         with:
           name: apk
           path: bin/*.apk
-          if-no-files-found: warn
+          if-no-files-found: error
