@@ -20,31 +20,27 @@ jobs:
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
             cmake libffi-dev libssl-dev libltdl-dev aidl ant
 
-      - name: Install buildozer + legacy-cgi everywhere
+      - name: Install buildozer + legacy-cgi
         run: |
           pip install --upgrade pip setuptools wheel
           pip install buildozer cython==0.29.36 virtualenv legacy-cgi
-          sudo -H /usr/bin/python3 -m pip install legacy-cgi || true
-          python -c "import cgi; print('OK: cgi доступен')"
+          python -c "import cgi; print('cgi OK')"
 
       - name: Build APK
         env:
           PIP_NO_BUILD_ISOLATION: "1"
-          PIP_USE_PEP517: "1"
         run: |
-          yes | buildozer -v android debug 2>&1 | tee buildozer_output.txt
+          set -eo pipefail
+          yes | buildozer -v android debug
+        continue-on-error: true
 
       - name: Show errors
         if: always()
-        run: grep -i -E "error|fail|exception|traceback|no module" buildozer_output.txt | tail -40 || true
-
-      - name: Show last 60
-        if: always()
-        run: tail -60 buildozer_output.txt
-
-      - name: Find APK
-        if: always()
-        run: find . -name "*.apk" -type f
+        run: |
+          echo "=== Tail of buildozer.log ==="
+          tail -60 .buildozer/android/platform/build-arm64-v8a/build/output.txt 2>/dev/null || echo "no log"
+          echo "=== APK search ==="
+          find . -name "*.apk" -type f
 
       - uses: actions/upload-artifact@v4
         if: always()
