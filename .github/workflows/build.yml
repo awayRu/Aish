@@ -3,55 +3,27 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: kivy/buildozer:1.4.0
+      options: --user root
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install system packages
+      - name: Build
         run: |
-          sudo apt update
-          sudo apt install -y \
-            git zip unzip openjdk-17-jdk-headless \
-            autoconf automake libtool libtool-bin pkg-config \
-            zlib1g-dev libncurses5-dev libncursesw5-dev \
-            cmake libffi-dev libssl-dev libltdl-dev aidl \
-            ant ccache
-
-      - name: Install buildozer
-        run: |
-          pip install --upgrade pip setuptools wheel
-          pip install buildozer cython==0.29.36 virtualenv
-
-      - name: Cache buildozer global dir
-        uses: actions/cache@v4
-        with:
-          path: ~/.buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: buildozer-${{ runner.os }}-
-
-      - name: Build APK
-        run: |
-          yes | buildozer -v android debug 2>&1 | tee buildozer_output.txt
+          yes | buildozer -v android debug 2>&1 | tee /tmp/log.txt
         continue-on-error: true
 
-      - name: Show last lines
+      - name: PRINT LAST 60 LINES
         if: always()
-        run: tail -80 buildozer_output.txt
+        run: tail -60 /tmp/log.txt
 
-      - name: Upload full log
+      - name: PRINT ERRORS ONLY
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-log
-          path: buildozer_output.txt
-          if-no-files-found: warn
+        run: grep -i -E "error|fail|exception|traceback|cannot|no such" /tmp/log.txt | tail -30 || true
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: apk
           path: bin/*.apk
