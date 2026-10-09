@@ -33,21 +33,32 @@ jobs:
           pip install buildozer
 
       - name: Build APK
-        env:
-          PIP_NO_BUILD_ISOLATION: "1"
-          PIP_LEGACY_RESOLVER: "1"
         run: |
+          unset ANDROID_HOME ANDROID_SDK_ROOT ANDROID_NDK_HOME ANDROID_NDK_ROOT
+          export PIP_NO_BUILD_ISOLATION=1
           yes | buildozer -v android debug 2>&1 | tee buildozer_output.txt
         continue-on-error: true
 
-      - name: Show errors
+      - name: Show real errors (with context)
         if: always()
         run: |
-          echo "=== LAST 80 LINES ==="
-          tail -80 buildozer_output.txt || echo "no log"
+          echo "=== ERRORS WITH CONTEXT ==="
+          grep -n -B2 -A5 -E "^(.*Error|.*error:|.*ERROR|.*Exception|.*FAILED|.*Failed|.*Traceback).*$" buildozer_output.txt | tail -80 || echo "no errors found"
           echo ""
-          echo "=== APK SEARCH ==="
-          find . -name "*.apk" -type f
+          echo "=== LAST 30 LINES ==="
+          tail -30 buildozer_output.txt
+
+      - name: Find APK
+        if: always()
+        run: find . -name "*.apk" -type f || echo "no apk"
+
+      - name: Upload full log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-log
+          path: buildozer_output.txt
+          if-no-files-found: warn
 
       - name: Upload APK
         if: always()
