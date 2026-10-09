@@ -12,46 +12,124 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v7
         with:
           python-version: '3.10'
 
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip autoconf automake libtool libtool-bin pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev libltdl-dev aidl ant
+          sudo apt-get install -y \
+            git zip unzip \
+            autoconf automake libtool libtool-bin \
+            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
+            cmake libffi-dev libssl-dev libltdl-dev \
+            aidl ant
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
+      - name: Verify Java version
+        run: |
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version 2>&1 | grep -Eq 'version "17\.'
+
       - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install cython==0.29.36 buildozer
+          pip install cython==0.29.36
+          pip install buildozer
 
       - name: Build APK
         shell: bash
         run: |
+          set +e
           set -o pipefail
           unset ANDROID_HOME ANDROID_SDK_ROOT ANDROID_NDK_HOME ANDROID_NDK_ROOT
           unset PIP_NO_USE_PEP517 PIP_NO_BUILD_ISOLATION
-          yes | buildozer -v android debug 2>&1 | tee buildozer_output.txt
 
-      - name: Decode persistent signing key
+          yes 2>/dev/null | buildozer -v android debug 2>&1 | tee buildozer_output.txt
+
+          pipeline_status=("${PIPESTATUS[@]}")
+          build_status="${pipeline_status[1]}"
+          echo "Buildozer exit code: ${build_status}"
+
+          if [ "$build_status" -ne 0 ]; then
+            exit "$build_status"
+          fi
+
+          test -n "$(find bin -maxdepth 1 -type f -name '*.apk' -print -quit)" || {
+            echo 'Buildozer returned success, but no APK was found in bin/.'
+            exit 1
+          }
+
+      - name: Show build diagnostics
+        if: always()
+        run: |
+          if [ -f buildozer_output.txt ]; then
+            echo "=== ERRORS WITH CONTEXT ==="
+            grep -n -B2 -A5 -E \
+              'Error|error:|ERROR|Exception|FAILED|Failed|Traceback' \
+              buildozer_output.txt | tail -80 || true
+            echo ""
+            echo "=== LAST 50 LINES ==="
+            tail -50 buildozer_output.txt
+          else
+            echo "Build log was not created."
+          fi
+
+      - name: Decode and validate persistent signing key
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
         run: |
-          test -n "$ANDROID_KEYSTORE_BASE64" || (echo 'Missing ANDROID_KEYSTORE_BASE64 repository secret' && exit 1)
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/aish-release.jks"
+          set -euo pipefail
+
+          test -n "$ANDROID_KEYSTORE_BASE64" || {
+            echo 'Missing ANDROID_KEYSTORE_BASE64 secret.'
+            exit 1
+          }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || {
+            echo 'Missing ANDROID_KEYSTORE_PASSWORD secret.'
+            exit 1
+          }
+          test -n "$ANDROID_KEY_ALIAS" || {
+            echo 'Missing ANDROID_KEY_ALIAS secret.'
+            exit 1
+          }
+          test -n "$ANDROID_KEY_PASSWORD" || {
+            echo 'Missing ANDROID_KEY_PASSWORD secret.'
+            exit 1
+          }
+
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" \
+            | base64 --decode > "$RUNNER_TEMP/aish-release.jks"
+
+          test -s "$RUNNER_TEMP/aish-release.jks" || {
+            echo 'Decoded keystore is empty.'
+            exit 1
+          }
+
+          keytool -list \
+            -keystore "$RUNNER_TEMP/aish-release.jks" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+
+          echo 'Keystore and alias verified.'
 
       - name: Sign APK with persistent key
         if: startsWith(github.ref, 'refs/tags/v')
@@ -62,24 +140,58 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APK=$(find bin -maxdepth 1 -type f -name '*.apk' | head -n 1)
-          test -n "$APK" || (echo 'APK not found in bin/' && exit 1)
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
-          test -n "$APKSIGNER" || (echo 'apksigner not found' && exit 1)
-          "$APKSIGNER" sign --ks "$RUNNER_TEMP/aish-release.jks" --ks-key-alias "$ANDROID_KEY_ALIAS" --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" --key-pass "pass:$ANDROID_KEY_PASSWORD" "$APK"
+
+          mapfile -t APK_FILES < <(
+            find bin -maxdepth 1 -type f -name '*.apk' -print | sort
+          )
+
+          test "${#APK_FILES[@]}" -eq 1 || {
+            echo "Expected exactly one APK in bin/, found ${#APK_FILES[@]}."
+            printf '%s\n' "${APK_FILES[@]}"
+            exit 1
+          }
+
+          APK="${APK_FILES[0]}"
+
+          APKSIGNER="$(find \
+            "$HOME/.buildozer/android/platform/android-sdk" \
+            /usr/local/lib/android/sdk \
+            "${ANDROID_HOME:-/nonexistent}" \
+            "${ANDROID_SDK_ROOT:-/nonexistent}" \
+            -type f -path '*/build-tools/*/apksigner' \
+            -print 2>/dev/null | sort -V | tail -n 1)"
+
+          test -n "$APKSIGNER" || {
+            echo 'Could not find Android apksigner.'
+            exit 1
+          }
+
+          SIGNED_APK="$RUNNER_TEMP/aichat-release-signed.apk"
+
+          "$APKSIGNER" sign \
+            --ks "$RUNNER_TEMP/aish-release.jks" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass "env:ANDROID_KEYSTORE_PASSWORD" \
+            --key-pass "env:ANDROID_KEY_PASSWORD" \
+            --out "$SIGNED_APK" "$APK"
+
+          "$APKSIGNER" verify --verbose "$SIGNED_APK"
+          mv "$SIGNED_APK" "$APK"
           "$APKSIGNER" verify --verbose "$APK"
 
+          echo "APK signed and verified: $APK"
+
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: apk
           path: bin/*.apk
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload build log
+      - name: Upload full build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: full-log
           path: buildozer_output.txt
@@ -90,6 +202,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
           name: AI Chat ${{ github.ref_name }}
           generate_release_notes: true
