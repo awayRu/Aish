@@ -19,11 +19,6 @@ android.ndk = 25b
 android.ndk_api = 24
 android.archs = arm64-v8a
 android.accept_sdk_license = True
-android.skip_update = False
-
-p4a.branch = master
-p4a.python_version = 3.11
-p4a.fork_url = https://github.com/kivy/python-for-android.git
 
 [buildozer]
 log_level = 2
