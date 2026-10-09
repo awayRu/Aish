@@ -28,58 +28,13 @@ jobs:
       - name: Install buildozer
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install legacy-cgi
           pip install cython==0.29.36
           pip install buildozer
 
-      - name: Create cgi shim (works for Python 3.13/3.14)
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/cgi_shim
-          cat > $GITHUB_WORKSPACE/cgi_shim/cgi.py << 'PYEOF'
-          import html
-          import urllib.parse
-
-          def escape(s, quote=False):
-              return html.escape(str(s), quote=quote)
-
-          def unescape(s):
-              return html.unescape(s)
-
-          def parse_qs(qs, keep_blank_values=False, strict_parsing=False,
-                       encoding='utf-8', errors='replace', separator='&'):
-              return urllib.parse.parse_qs(qs, keep_blank_values, strict_parsing,
-                                           encoding, errors, separator)
-
-          def parse_qsl(qs, keep_blank_values=False, strict_parsing=False,
-                        encoding='utf-8', errors='replace', separator='&'):
-              return urllib.parse.parse_qsl(qs, keep_blank_values, strict_parsing,
-                                            encoding, errors, separator)
-
-          class FieldStorage: pass
-          class MiniFieldStorage: pass
-          PYEOF
-          PYTHONPATH=$GITHUB_WORKSPACE/cgi_shim python -c "import cgi; print('Shim OK:', cgi.escape('<x>'))"
-
-      - name: Set global pip config
-        run: |
-          sudo mkdir -p /etc/pip
-          sudo tee /etc/pip.conf >/dev/null << 'EOF'
-          [global]
-          no-build-isolation = true
-          no-use-pep517 = true
-          EOF
-          mkdir -p ~/.config/pip
-          cp /etc/pip.conf ~/.config/pip/pip.conf
-
       - name: Build APK
-        env:
-          PYTHONPATH: ${{ github.workspace }}/cgi_shim
-          PIP_CONFIG_FILE: /etc/pip.conf
-          PIP_NO_BUILD_ISOLATION: "1"
-          PIP_NO_USE_PEP517: "1"
-          PIP_USE_PEP517: "false"
         run: |
           unset ANDROID_HOME ANDROID_SDK_ROOT ANDROID_NDK_HOME ANDROID_NDK_ROOT
+          unset PIP_NO_USE_PEP517 PIP_NO_BUILD_ISOLATION
           yes | buildozer -v android debug 2>&1 | tee buildozer_output.txt
         continue-on-error: true
 
