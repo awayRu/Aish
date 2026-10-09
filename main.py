@@ -3014,7 +3014,7 @@ class ChatApp(App):
                 },
             )
             with urllib.request.urlopen(
-                request, timeout=8, context=ssl.create_default_context()
+                request, timeout=15, context=SSL_CONTEXT
             ) as response:
                 release = json.loads(response.read().decode("utf-8"))
 
