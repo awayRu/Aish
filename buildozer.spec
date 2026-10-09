@@ -18,9 +18,6 @@ android.minapi = 24
 android.ndk = 25b
 android.archs = arm64-v8a
 
-p4a.branch = master
-p4a.python_version = 3.11
-
 [buildozer]
 log_level = 2
 warn_on_root = 1
