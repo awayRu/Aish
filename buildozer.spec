@@ -6,7 +6,8 @@ package.domain = org.aichat
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 
-version = 0.1
+version = 0.2
+android.numeric_version = 20
 
 requirements = python3,kivy==2.1.0,pyjnius
 
