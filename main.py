@@ -26,6 +26,11 @@ import urllib.error
 import urllib.parse
 from datetime import datetime as DT
 
+# App version used by the in-app GitHub Releases checker. Bump this per release.
+APP_VERSION = "19"
+UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
+
+
 os.environ.setdefault("KIVY_NO_ARGS", "1")
 os.environ.setdefault("KIVY_NO_CONSOLELOG", "1")
 
@@ -2734,7 +2739,7 @@ class ChatRoot(BoxLayout):
                 # Do not include API credentials in backups.
                 meta = {row["k"]: row["v"] for row in DB.execute("SELECT k,v FROM meta")
                         if row["k"] not in ("pollinations_api_key",)}
-            payload = {"app": "AI Chat Premium", "version": "v17", "exported_at": DT.now().isoformat(timespec="seconds"),
+            payload = {"app": "AI Chat Premium", "version": "v" + APP_VERSION, "exported_at": DT.now().isoformat(timespec="seconds"),
                        "sessions": sessions, "messages": messages, "notes": notes, "settings": meta}
             path = os.path.join(ROOT, "ai_chat_backup_" + DT.now().strftime("%Y%m%d_%H%M%S") + ".json")
             with open(path, "w", encoding="utf-8") as stream:
@@ -2984,6 +2989,128 @@ class ChatApp(App):
         Window.clearcolor = T("bg_top")
         self.root_widget = ChatRoot()
         return self.root_widget
+
+    def on_start(self):
+        """Check GitHub Releases in a background thread; never block the UI."""
+        threading.Thread(
+            target=self._check_for_updates_worker,
+            daemon=True,
+            name="github-update-check",
+        ).start()
+
+    @staticmethod
+    def _version_tuple(value):
+        parts = re.findall(r"\d+", str(value))
+        return tuple(int(part) for part in parts) if parts else (0,)
+
+    def _check_for_updates_worker(self):
+        try:
+            request = urllib.request.Request(
+                UPDATE_API_URL,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "AI-Chat-Premium-Updater",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            with urllib.request.urlopen(
+                request, timeout=8, context=ssl.create_default_context()
+            ) as response:
+                release = json.loads(response.read().decode("utf-8"))
+
+            latest_version = str(release.get("tag_name", "")).strip()
+            if not latest_version:
+                return
+            if self._version_tuple(latest_version) <= self._version_tuple(APP_VERSION):
+                return
+
+            release_url = str(
+                release.get("html_url", "https://github.com/awayRu/Aish/releases")
+            ).strip()
+            apk_asset = next(
+                (
+                    asset for asset in (release.get("assets") or [])
+                    if str(asset.get("name", "")).lower().endswith(".apk")
+                    and asset.get("browser_download_url")
+                ),
+                None,
+            )
+            download_url = (
+                str(apk_asset["browser_download_url"])
+                if apk_asset else release_url
+            )
+            release_notes = str(release.get("body", "")).strip()[:700]
+            Clock.schedule_once(
+                lambda _dt: self._show_update_dialog(
+                    latest_version, download_url, release_url, release_notes
+                ),
+                0,
+            )
+        except Exception:
+            # Offline, API limit, or no published Release: keep the app working.
+            return
+
+    def _show_update_dialog(self, version, download_url, release_url, release_notes=""):
+        try:
+            content = BoxLayout(
+                orientation="vertical",
+                padding=dp(16),
+                spacing=dp(10),
+            )
+            message = (
+                f"Доступно обновление AI Chat: {version}\n"
+                f"Установлена версия: v{APP_VERSION}"
+            )
+            if release_notes:
+                message += "\n\n" + release_notes
+            label = Label(
+                text=message,
+                color=T("text"),
+                font_size=sp(13),
+                halign="left",
+                valign="middle",
+            )
+            label.bind(size=lambda widget, *_: setattr(
+                widget, "text_size", (widget.width, None)
+            ))
+            content.add_widget(label)
+
+            actions = BoxLayout(
+                size_hint_y=None,
+                height=dp(46),
+                spacing=dp(8),
+            )
+            popup = Popup(
+                title="Доступно обновление",
+                content=content,
+                size_hint=(0.92, None),
+                height=dp(310 if release_notes else 220),
+                auto_dismiss=True,
+            )
+            later = Button(text="Позже", size_hint_x=0.40)
+            update = Button(text="Скачать", size_hint_x=0.60)
+
+            def open_download(*_args):
+                popup.dismiss()
+                try:
+                    opened = webbrowser.open(download_url or release_url)
+                    if not opened:
+                        webbrowser.open(release_url)
+                except Exception:
+                    try:
+                        webbrowser.open(release_url)
+                    except Exception:
+                        pass
+
+            later.bind(on_release=popup.dismiss)
+            update.bind(on_release=open_download)
+            actions.add_widget(later)
+            actions.add_widget(update)
+            content.add_widget(actions)
+            popup.open()
+        except Exception:
+            # A UI notification must never crash the application.
+            pass
 
     def rebuild_ui(self):
         old = self.root_widget
