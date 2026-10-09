@@ -8,16 +8,6 @@ source.include_exts = py,png,jpg,kv,atlas
 
 version = 0.1
 
-# ИСПРАВЛЕНО: добавлен jnius [app]
-title = AI Chat
-package.name = aichat
-package.domain = org.aichat
-
-source.dir = .
-source.include_exts = py,png,jpg,kv,atlas
-
-version = 0.1
-
 requirements = python3,kivy==2.2.1,pyjnius
 
 orientation = portrait
