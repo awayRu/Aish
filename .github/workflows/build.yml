@@ -20,34 +20,31 @@ jobs:
             pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
             cmake libffi-dev libssl-dev libltdl-dev aidl ant
 
-      - name: Install buildozer
+      - name: Install buildozer + legacy-cgi everywhere
         run: |
           pip install --upgrade pip setuptools wheel
           pip install buildozer cython==0.29.36 virtualenv legacy-cgi
-
-      - name: Fix python3 symlink
-        run: |
-          sudo ln -sf $(which python3) /usr/local/bin/python3
-          python3 --version
+          sudo -H /usr/bin/python3 -m pip install legacy-cgi || true
+          python -c "import cgi; print('OK: cgi доступен')"
 
       - name: Build APK
+        env:
+          PIP_NO_BUILD_ISOLATION: "1"
+          PIP_USE_PEP517: "1"
         run: |
           yes | buildozer -v android debug 2>&1 | tee buildozer_output.txt
 
-      - name: Show last 80 lines
+      - name: Show errors
         if: always()
-        run: tail -80 buildozer_output.txt
+        run: grep -i -E "error|fail|exception|traceback|no module" buildozer_output.txt | tail -40 || true
 
-      - name: Show errors only
+      - name: Show last 60
         if: always()
-        run: grep -i -E "error|fail|exception|traceback|cannot|no such file" buildozer_output.txt | tail -40 || true
+        run: tail -60 buildozer_output.txt
 
-      - name: Show APK
+      - name: Find APK
         if: always()
-        run: |
-          echo "=== APK files ==="
-          find . -name "*.apk" -type f
-          ls -la bin/ 2>/dev/null || echo "no bin dir"
+        run: find . -name "*.apk" -type f
 
       - uses: actions/upload-artifact@v4
         if: always()
