@@ -8,19 +8,20 @@ source.include_exts = py,png,jpg,kv,atlas
 
 version = 0.1
 
-# --- Ключевые зависимости для решения проблем ---
-requirements = python3,kivy==2.2.1,pyjnius
+# ИСПРАВЛЕНО: добавлен jnius с указанием версии
+requirements = python3,kivy==2.2.1,jnius>=1.4.0
 
-# --- Настройки Android ---
 orientation = portrait
 fullscreen = 0
 
 android.permissions = INTERNET
-android.api = 31
+android.api = 33
 android.minapi = 24
 android.ndk = 25b
 android.archs = arm64-v8a
 android.accept_sdk_license = True
+# ИСПРАВЛЕНО: добавлена версия build tools
+android.build_tools_version = 33.0.2
 
 [buildozer]
 log_level = 2
