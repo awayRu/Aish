@@ -3,24 +3,44 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: kivy/buildozer:latest
-      options: --user root
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system packages
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            git zip unzip openjdk-17-jdk-headless \
+            autoconf automake libtool libtool-bin pkg-config \
+            zlib1g-dev libncurses5-dev libncursesw5-dev \
+            cmake libffi-dev libssl-dev libltdl-dev aidl \
+            ant ccache
+
+      - name: Install buildozer
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install buildozer cython==0.29.36 virtualenv
+
+      - name: Cache buildozer global dir
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: buildozer-${{ runner.os }}-
 
       - name: Build APK
         run: |
           yes | buildozer -v android debug 2>&1 | tee buildozer_output.txt
         continue-on-error: true
 
-      - name: Show errors
+      - name: Show last lines
         if: always()
-        run: |
-          echo "=== LAST 100 LINES ==="
-          tail -100 buildozer_output.txt || true
-          echo "=== ERRORS ==="
-          grep -i -E "error|failed|exception" buildozer_output.txt | tail -50 || true
+        run: tail -80 buildozer_output.txt
 
       - name: Upload full log
         if: always()
@@ -31,7 +51,6 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: apk
