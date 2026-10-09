@@ -27,7 +27,7 @@ import urllib.parse
 from datetime import datetime as DT
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "20"
+APP_VERSION = "21"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
