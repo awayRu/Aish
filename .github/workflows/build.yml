@@ -3,24 +3,46 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: kivy/buildozer:1.4.0
-      options: --user root
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system packages
         run: |
-          yes | buildozer -v android debug 2>&1 | tee /tmp/log.txt
-        continue-on-error: true
+          sudo apt update
+          sudo apt install -y \
+            git zip unzip \
+            openjdk-17-jdk-headless \
+            autoconf automake libtool libtool-bin \
+            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
+            cmake libffi-dev libssl-dev libltdl-dev aidl ant
 
-      - name: PRINT LAST 60 LINES
-        if: always()
-        run: tail -60 /tmp/log.txt
+      - name: Install buildozer
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install buildozer cython==0.29.36 virtualenv
 
-      - name: PRINT ERRORS ONLY
+      - name: Build APK
+        run: |
+          yes | buildozer -v android debug 2>&1 | tee buildozer_output.txt
+
+      - name: Show last 80 lines
         if: always()
-        run: grep -i -E "error|fail|exception|traceback|cannot|no such" /tmp/log.txt | tail -30 || true
+        run: tail -80 buildozer_output.txt
+
+      - name: Show errors only
+        if: always()
+        run: grep -i -E "error|fail|exception|traceback|cannot|no such file" buildozer_output.txt | tail -40 || true
+
+      - name: Show APK
+        if: always()
+        run: |
+          echo "=== APK files ==="
+          find . -name "*.apk" -type f
+          ls -la bin/ 2>/dev/null || echo "no bin dir"
 
       - uses: actions/upload-artifact@v4
         if: always()
