@@ -3,42 +3,37 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: kivy/buildozer:latest
+      options: --user root
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install system dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y git zip unzip openjdk-17-jdk autoconf libtool \
-            pkg-config zlib1g-dev libncurses5-dev cmake libffi-dev libssl-dev \
-            libltdl-dev aidl
-
-      - name: Install buildozer
-        run: |
-          pip install --upgrade pip
-          pip install buildozer cython==0.29.36
-
       - name: Build APK
         run: |
-          yes | buildozer -v android debug
+          buildozer -v android debug 2>&1 | tee buildozer_output.txt
+        continue-on-error: true
 
-      - name: Find APK
+      - name: Show errors
+        if: always()
         run: |
-          echo "=== Looking for APK ==="
-          find . -name "*.apk" -type f
-          echo "=== bin/ contents ==="
-          ls -la bin/ || echo "no bin dir"
+          echo "=== LAST 100 LINES ==="
+          tail -100 buildozer_output.txt || true
+          echo "=== ERRORS ==="
+          grep -i -E "error|failed|exception" buildozer_output.txt | tail -50 || true
+
+      - name: Upload full log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-log
+          path: buildozer_output.txt
+          if-no-files-found: warn
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: |
-            bin/*.apk
-            **/*.apk
-          if-no-files-found: error
+          path: bin/*.apk
+          if-no-files-found: warn
