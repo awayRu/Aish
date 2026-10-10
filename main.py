@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AI Чат Premium v22 — rich-text Kivy assistant for Pydroid 3.
+"""AI Чат Premium v23 — rich-text Kivy assistant for Pydroid 3.
 
 Core features: multiple chats, SQLite history, SSE responses, provider fallback,
 notes, starred messages, safe calculator, image generation, voice I/O and themes.
@@ -27,7 +27,7 @@ import urllib.parse
 from datetime import datetime as DT
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "22"
+APP_VERSION = "23"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -1072,7 +1072,7 @@ def generate_image(prompt, callback, cancel_event=None, api_key=None):
                 elif data.startswith((b"GIF87a", b"GIF89a")):
                     ext = ".gif"
                 else:
-                    sample = data[:350].decode("utf-8", "replace").replace("\\n", " ")
+                    sample = data[:350].decode("utf-8", "replace").replace("\n", " ")
                     if not data:
                         raise ValueError("Сервис вернул пустой ответ")
                     raise ValueError("API вернул не изображение. " + friendly_api_error(sample))
@@ -2897,7 +2897,6 @@ class ChatRoot(BoxLayout):
         self.load_chat()
         self._build_chips()
         self._set_chips_visible(True)
-
     def confirm_clear(self):
         confirm = Popup(title="Очистить чат?", title_color=T("text"), separator_color=T("danger"),
                         background_color=T("panel"), size_hint=(0.82, 0.33))
@@ -3020,8 +3019,14 @@ class ChatApp(App):
 
             latest_version = str(release.get("tag_name", "")).strip()
             if not latest_version:
+                Clock.schedule_once(
+                    lambda _dt: self.root_widget.toast("Обновление: GitHub не вернул номер версии."), 0
+                )
                 return
-            if self._version_tuple(latest_version) <= self._version_tuple(APP_VERSION):
+            latest_tuple = self._version_tuple(latest_version)
+            installed_tuple = self._version_tuple(APP_VERSION)
+            print(f"[Updater] installed={APP_VERSION}; latest={latest_version}")
+            if latest_tuple <= installed_tuple:
                 return
 
             release_url = str(
@@ -3046,9 +3051,15 @@ class ChatApp(App):
                 ),
                 0,
             )
-        except Exception:
-            # Offline, API limit, or no published Release: keep the app working.
-            return
+        except Exception as exc:
+            error_text = f"{type(exc).__name__}: {exc}".strip()[:120]
+            print("[Updater] GitHub Releases check failed:", error_text)
+            Clock.schedule_once(
+                lambda _dt, msg=error_text: self.root_widget.toast(
+                    "Ошибка проверки обновления: " + msg[:90]
+                ),
+                0,
+            )
 
     def _show_update_dialog(self, version, download_url, release_url, release_notes=""):
         try:
@@ -3108,9 +3119,8 @@ class ChatApp(App):
             actions.add_widget(update)
             content.add_widget(actions)
             popup.open()
-        except Exception:
-            # A UI notification must never crash the application.
-            pass
+        except Exception as exc:
+            print("[Updater] Cannot show update dialog:", repr(exc))
 
     def rebuild_ui(self):
         old = self.root_widget
