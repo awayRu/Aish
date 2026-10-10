@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AI Чат Premium v19 — rich-text Kivy assistant for Pydroid 3.
+"""AI Чат Premium v22 — rich-text Kivy assistant for Pydroid 3.
 
 Core features: multiple chats, SQLite history, SSE responses, provider fallback,
 notes, starred messages, safe calculator, image generation, voice I/O and themes.
@@ -27,7 +27,7 @@ import urllib.parse
 from datetime import datetime as DT
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "21"
+APP_VERSION = "22"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
