@@ -6,10 +6,10 @@ package.domain = org.aichat
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 
-version = 0.4
-android.numeric_version = 22
+version = 0.5
+android.numeric_version = 23
 
-requirements = python3,kivy==2.1.0,pyjnius
+requirements = python3,kivy==2.1.0,pyjnius,certifi
 
 orientation = portrait
 fullscreen = 0
