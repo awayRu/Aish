@@ -1,4 +1,3 @@
-
 [app]
 title = AI Chat
 package.name = aichat
