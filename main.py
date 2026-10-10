@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AI Чат Premium v23 — rich-text Kivy assistant for Pydroid 3.
+"""AI Чат Premium — rich-text Kivy assistant for Pydroid 3.
 
 Core features: multiple chats, SQLite history, SSE responses, provider fallback,
 notes, starred messages, safe calculator, image generation, voice I/O and themes.
@@ -9,6 +9,8 @@ import os
 import sys
 import json
 import base64
+import hashlib
+import platform
 import mimetypes
 import shutil
 import webbrowser
@@ -20,6 +22,7 @@ import ast
 import operator
 import re
 import math
+import random
 import sqlite3
 import urllib.request
 import urllib.error
@@ -27,12 +30,12 @@ import urllib.parse
 from datetime import datetime as DT
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "23"
+APP_VERSION = "30"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
 os.environ.setdefault("KIVY_NO_ARGS", "1")
-os.environ.setdefault("KIVY_NO_CONSOLELOG", "1")
+# Keep Kivy console logging enabled: startup errors must remain visible in Pydroid.
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -41,6 +44,7 @@ from kivy.metrics import dp, sp
 from kivy.animation import Animation
 from kivy.graphics import Color, Rectangle, RoundedRectangle, Ellipse, Line, Triangle
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.button import Button
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.label import Label
@@ -50,7 +54,6 @@ from kivy.uix.popup import Popup
 from kivy.uix.widget import Widget
 from kivy.uix.modalview import ModalView
 from kivy.uix.image import Image as KivyImage
-from kivy.uix.filechooser import FileChooserIconView
 
 # Android keyboard: disable automatic whole-window panning. ChatRoot adds a
 # bottom inset when the IME appears, keeping the header stable and composer visible.
@@ -72,7 +75,7 @@ THEMES = {
         "panel3": (0.157, 0.173, 0.220, 1), "bubble_me": (0.255, 0.435, 0.910, 1),
         "bubble_ai": (0.105, 0.122, 0.161, 1), "text": (0.945, 0.953, 0.973, 1),
         "text_dim": (0.610, 0.635, 0.690, 1), "text_faint": (0.400, 0.427, 0.486, 1),
-        "accent": (0.400, 0.510, 0.980, 1), "accent_soft": (0.145, 0.185, 0.325, 1),
+        "accent": (0.365, 0.535, 1.000, 1), "accent_soft": (0.135, 0.190, 0.345, 1),
         "danger": (0.965, 0.365, 0.390, 1), "danger_bg": (0.255, 0.105, 0.145, 1),
         "success": (0.275, 0.855, 0.545, 1), "success_bg": (0.095, 0.215, 0.155, 1),
         "star": (1.0, 0.765, 0.245, 1), "star_bg": (0.285, 0.205, 0.065, 1),
@@ -87,7 +90,7 @@ THEMES = {
         "panel3": (0.125, 0.133, 0.180, 1), "bubble_me": (0.315, 0.205, 0.745, 1),
         "bubble_ai": (0.075, 0.082, 0.122, 1), "text": (0.920, 0.925, 0.960, 1),
         "text_dim": (0.600, 0.612, 0.680, 1), "text_faint": (0.365, 0.376, 0.435, 1),
-        "accent": (0.565, 0.390, 0.965, 1), "accent_soft": (0.180, 0.120, 0.310, 1),
+        "accent": (0.625, 0.445, 1.000, 1), "accent_soft": (0.190, 0.125, 0.335, 1),
         "danger": (0.960, 0.365, 0.420, 1), "danger_bg": (0.225, 0.085, 0.135, 1),
         "success": (0.255, 0.800, 0.500, 1), "success_bg": (0.075, 0.190, 0.135, 1),
         "star": (1.0, 0.735, 0.220, 1), "star_bg": (0.235, 0.165, 0.055, 1),
@@ -96,13 +99,28 @@ THEMES = {
         "chip_text": (0.765, 0.780, 0.835, 1), "shadow": (0, 0, 0, 0.34),
         "ring_bg": (0.012, 0.016, 0.031, 1),
     },
+    "aurora": {
+        "bg_top": (0.025, 0.031, 0.070, 1), "bg_bot": (0.043, 0.055, 0.114, 1),
+        "panel": (0.055, 0.065, 0.125, 1), "panel2": (0.080, 0.092, 0.170, 1),
+        "panel3": (0.120, 0.135, 0.235, 1), "bubble_me": (0.315, 0.285, 0.835, 1),
+        "bubble_ai": (0.069, 0.080, 0.145, 1), "text": (0.957, 0.965, 0.995, 1),
+        "text_dim": (0.625, 0.664, 0.765, 1), "text_faint": (0.397, 0.432, 0.555, 1),
+        "accent": (0.475, 0.455, 1.000, 1), "accent_soft": (0.145, 0.140, 0.315, 1),
+        "danger": (0.975, 0.390, 0.490, 1), "danger_bg": (0.245, 0.085, 0.155, 1),
+        "success": (0.280, 0.890, 0.690, 1), "success_bg": (0.070, 0.205, 0.180, 1),
+        "star": (1.000, 0.790, 0.310, 1), "star_bg": (0.270, 0.195, 0.065, 1),
+        "avatar_me": (0.430, 0.330, 0.960, 1), "avatar_ai": (0.105, 0.735, 0.625, 1),
+        "online": (0.300, 0.905, 0.700, 1), "chip": (0.078, 0.091, 0.166, 1),
+        "chip_text": (0.815, 0.835, 0.905, 1), "shadow": (0.005, 0.008, 0.025, 0.28),
+        "ring_bg": (0.025, 0.031, 0.070, 1),
+    },
     "daylight": {
         "bg_top": (0.955, 0.965, 0.982, 1), "bg_bot": (0.910, 0.929, 0.965, 1),
         "panel": (0.977, 0.982, 0.992, 1), "panel2": (0.900, 0.916, 0.947, 1),
         "panel3": (0.835, 0.857, 0.900, 1), "bubble_me": (0.245, 0.455, 0.925, 1),
         "bubble_ai": (0.992, 0.994, 1.000, 1), "text": (0.090, 0.102, 0.145, 1),
         "text_dim": (0.365, 0.390, 0.455, 1), "text_faint": (0.565, 0.585, 0.645, 1),
-        "accent": (0.190, 0.390, 0.850, 1), "accent_soft": (0.850, 0.890, 0.985, 1),
+        "accent": (0.165, 0.365, 0.875, 1), "accent_soft": (0.835, 0.885, 0.995, 1),
         "danger": (0.825, 0.180, 0.220, 1), "danger_bg": (0.985, 0.885, 0.900, 1),
         "success": (0.105, 0.590, 0.350, 1), "success_bg": (0.860, 0.950, 0.890, 1),
         "star": (0.780, 0.520, 0.055, 1), "star_bg": (0.985, 0.930, 0.795, 1),
@@ -156,18 +174,40 @@ SAFE_PROMPT = (
     "быстро понять главное. Если просят ответить в определённом количестве слов, строго соблюдай это. "
     "Для кода сохраняй отступы и добавляй короткие пояснения. "
     "Не выдумывай факты; если не уверен, честно скажи об этом. "
-    "Не утверждай, что выполнял действия, которые не выполнял."
+    "Не утверждай, что выполнял действия, которые не выполнял. "
+    "Если спрашивают, кто ты или как тебя зовут, отвечай: «Я — AI Chat, ИИ-помощник этого приложения». "
+    "Не называй случайный сторонний сервис или поставщика модели своей личностью; не выдумывай, какая именно модель отвечает."
 )
+
+IDENTITY_REPLY = (
+    "Я — AI Chat, ИИ-помощник этого приложения. Я помогаю отвечать на вопросы, "
+    "объяснять темы, писать тексты и разбираться с кодом. Моё имя в этом приложении — AI Chat."
+)
+
+def is_identity_question(text):
+    """Recognize direct identity questions so providers cannot answer them inconsistently."""
+    value = re.sub(r"[^\w]+", " ", str(text or "").lower(), flags=re.UNICODE).strip()
+    patterns = (
+        r"\bкто ты\b", r"\bты кто\b", r"\bкак тебя зовут\b",
+        r"\bчто ты за (?:ии|нейросеть|модель|ассистент)\b",
+        r"\bкакая у тебя модель\b", r"\bназови свою модель\b",
+        r"\bкто ты такой\b", r"\bкакая у тебя нейросеть\b",
+        r"\bна какой модели ты работаешь\b", r"\bты работаешь на какой модели\b",
+        r"\bчто за нейросеть\b", r"\bwhat are you\b",
+        r"\bwho are you\b", r"\bwhat model are you\b",
+    )
+    return any(re.search(pattern, value) for pattern in patterns)
+
 STATE = {
-    "theme": "night", "font_size": "medium", "font_weight": "normal", "font_family": "roboto",
+    "theme": "aurora", "font_size": "medium", "font_weight": "normal", "font_family": "roboto",
     "msg_spacing": "normal", "show_time": True, "show_avatars": True,
     "voice_out": False, "last_provider": "-", "last_model": "-",
     # User-configurable behavior. Values are persisted in SQLite meta.
     "provider_preference": "auto", "fallback_enabled": True,
     "streaming": True, "creativity": "balanced", "response_length": "normal",
     "auto_scroll": True, "show_suggestions": True, "show_model_status": True,
-    "message_animations": True, "performance_mode": True,
-    "image_size": "1024", "image_model": "flux", "custom_prompt": "",
+    "message_animations": True, "performance_mode": True, "sparkle_background": True,
+    "image_size": "512", "custom_prompt": "",
 }
 
 
@@ -372,15 +412,15 @@ def render_markdown(text, base_size=None):
                     headers = [inferred[min(col, len(inferred)-1)] for col in range(max_cols)]
                     rows = table_rows
             append_spacer()
-            title = "ТАБЛИЦА · " + " · ".join(headers[:3])
-            output.append("[size={}][color={}][b]▦ {}[/b][/color][/size]".format(
+            title = " · ".join(headers[:3])
+            output.append("[size={}][color={}][b]ТАБЛИЦА · {}[/b][/color][/size]".format(
                 max(1, round(size * 0.90)), accent, inline(title)))
             for row in rows:
                 if len(row) < len(headers):
                     row += [""] * (len(headers) - len(row))
                 label = row[0] if row else ""
                 if label:
-                    output.append("[color={}][b]● {}[/b][/color]".format(accent, inline(label)))
+                    output.append("[color={}][b]• {}[/b][/color]".format(accent, inline(label)))
                 for col_index in range(1, min(len(headers), len(row))):
                     if row[col_index]:
                         output.append("[color={}][b]{}:[/b][/color] {}".format(
@@ -641,7 +681,7 @@ _SETTING_KEYS = (
     "theme", "font_size", "font_weight", "font_family", "msg_spacing", "show_time", "show_avatars",
     "voice_out", "provider_preference", "fallback_enabled", "streaming", "creativity",
     "response_length", "auto_scroll", "show_suggestions", "show_model_status",
-    "message_animations", "performance_mode", "image_size", "image_model", "custom_prompt",
+    "message_animations", "performance_mode", "sparkle_background", "image_size", "custom_prompt",
 )
 
 
@@ -657,12 +697,12 @@ def save_settings():
 
 
 _SETTING_DEFAULTS = {
-    "theme": "night", "font_size": "medium", "font_weight": "normal", "font_family": "roboto", "msg_spacing": "normal",
+    "theme": "aurora", "font_size": "medium", "font_weight": "normal", "font_family": "roboto", "msg_spacing": "normal",
     "show_time": True, "show_avatars": True, "voice_out": False,
     "provider_preference": "auto", "fallback_enabled": True, "streaming": True,
     "creativity": "balanced", "response_length": "normal", "auto_scroll": True,
     "show_suggestions": True, "show_model_status": True, "message_animations": True,
-    "performance_mode": True, "image_size": "1024", "image_model": "flux", "custom_prompt": "",
+    "performance_mode": True, "sparkle_background": True, "image_size": "512", "custom_prompt": "",
 }
 _SETTING_CHOICES = {
     "theme": set(THEMES), "font_size": set(FONTS), "font_weight": {"normal", "bold"},
@@ -670,10 +710,10 @@ _SETTING_CHOICES = {
     "msg_spacing": set(SPACING), "provider_preference": {"auto", "KeylessAI", "Kilo", "LLM7", "Pollinations"},
     "creativity": {"precise", "balanced", "creative"},
     "response_length": {"short", "normal", "long"},
-    "image_size": {"512", "768", "1024"}, "image_model": {"flux", "zimage"},
+    "image_size": {"512", "768"},
 }
 _BOOLEAN_SETTINGS = {"show_time", "show_avatars", "voice_out", "fallback_enabled", "streaming",
-                     "auto_scroll", "show_suggestions", "show_model_status", "message_animations", "performance_mode"}
+                     "auto_scroll", "show_suggestions", "show_model_status", "message_animations", "performance_mode", "sparkle_background"}
 for _k, _default in _SETTING_DEFAULTS.items():
     _stored = _meta_get(_k, "1" if _default is True else "0" if _default is False else str(_default))
     if _k in _BOOLEAN_SETTINGS:
@@ -686,6 +726,18 @@ for _k, _default in _SETTING_DEFAULTS.items():
         STATE[_k] = str(_stored)
 
 # Current Pollinations API key; never hard-code personal credentials in source.
+# One-time design refresh migration. Existing sessions/history remain untouched.
+try:
+    if _meta_get("ui_redesign_version", "0") != "28":
+        if STATE.get("theme") == "night":
+            STATE["theme"] = "aurora"
+        # The new surface is intentionally calmer by default; particles remain optional.
+        STATE["sparkle_background"] = False
+        _meta_set("ui_redesign_version", "28")
+        save_settings()
+except Exception:
+    pass
+
 IMAGE_API_KEY = _meta_get("pollinations_api_key", "").strip()
 
 def save_image_api_key(value):
@@ -1032,73 +1084,138 @@ def ask_ai(messages, on_chunk=None, cancel_event=None):
 # ---------------------------------------------------------------------------
 
 
-def generate_image(prompt, callback, cancel_event=None, api_key=None):
-    """Generate via the current Pollinations image endpoint; never use retired text API."""
-    key = str(api_key or "").strip()
+def generate_image(prompt, callback, cancel_event=None):
+    """Generate an image through AI Horde using its public anonymous key.
+
+    No personal API key is required. Anonymous jobs have low queue priority, so
+    polling is bounded and the user receives a readable timeout/error message.
+    Callback is always scheduled on the Kivy thread.
+    """
+    clean_prompt = str(prompt or "").strip()[:700]
+
     def worker():
         path = None
         error = None
-        if not key:
-            error = ("Для создания изображений нужен личный ключ Pollinations API.\n"
-                     "Открой Настройки → Изображения → Открыть страницу ключа, "
-                     "получи ключ и сохрани его в приложении.")
-        elif cancel_event and cancel_event.is_set():
-            error = "Создание изображения отменено."
-        else:
-            encoded = urllib.parse.quote(str(prompt or "").strip()[:700], safe="")
-            image_size = STATE.get("image_size", "1024")
-            image_model = STATE.get("image_model", "flux")
-            url = (f"https://gen.pollinations.ai/image/{encoded}"
-                   f"?model={urllib.parse.quote(image_model)}&width={image_size}&height={image_size}&nologo=true")
+        request_id = None
+        try:
+            if not clean_prompt:
+                raise ValueError("Напиши, что нужно нарисовать.")
+            if cancel_event and cancel_event.is_set():
+                raise InterruptedError("Создание изображения отменено.")
+
+            base = "https://aihorde.net/api/v2"
+            # AI Horde requires the API key in the HTTP HEADER, not in the JSON body.
+            # 0000000000 is the documented anonymous key; registered-user keys are optional.
+            headers = {
+                "User-Agent": UA,
+                "Client-Agent": "AI-Chat:28:github.com/awayRu/Aish",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "apikey": "0000000000",
+            }
+            payload = {
+                "prompt": clean_prompt,
+                "params": {
+                    "width": int(STATE.get("image_size", "512")) if str(STATE.get("image_size", "512")).isdigit() else 512,
+                    "height": int(STATE.get("image_size", "512")) if str(STATE.get("image_size", "512")).isdigit() else 512,
+                    "steps": 20,
+                    "n": 1,
+                    "cfg_scale": 7.0,
+                    "karras": True,
+                },
+                "nsfw": False,
+                "censor_nsfw": True,
+                "r2": True,
+                "shared": True,
+            }
+            payload["params"]["width"] = max(256, min(768, payload["params"]["width"]))
+            payload["params"]["height"] = max(256, min(768, payload["params"]["height"]))
+
+            req = urllib.request.Request(
+                base + "/generate/async",
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
             try:
-                req = urllib.request.Request(url, headers={
-                    "User-Agent": UA,
-                    "Accept": "image/png,image/jpeg,image/webp,*/*",
-                    "Authorization": "Bearer " + key,
-                })
-                with urllib.request.urlopen(req, timeout=120, context=SSL_CONTEXT) as response:
-                    content_type = (response.headers.get("Content-Type") or "").lower()
-                    data = response.read(15 * 1024 * 1024 + 1)
-                if cancel_event and cancel_event.is_set():
-                    raise InterruptedError("Создание изображения отменено")
-                if len(data) > 15 * 1024 * 1024:
-                    raise ValueError("Изображение больше 15 МБ")
-                if data.startswith(b"\x89PNG\r\n\x1a\n"):
-                    ext = ".png"
-                elif data.startswith(b"\xff\xd8\xff"):
-                    ext = ".jpg"
-                elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-                    ext = ".webp"
-                elif data.startswith((b"GIF87a", b"GIF89a")):
-                    ext = ".gif"
-                else:
-                    sample = data[:350].decode("utf-8", "replace").replace("\n", " ")
-                    if not data:
-                        raise ValueError("Сервис вернул пустой ответ")
-                    raise ValueError("API вернул не изображение. " + friendly_api_error(sample))
-                if len(data) < 1000:
-                    raise ValueError("API вернул слишком маленький файл")
-                filename = "image_" + DT.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6] + ext
-                path = os.path.join(IMG_DIR, filename)
-                with open(path, "wb") as file:
-                    file.write(data)
+                with urllib.request.urlopen(req, timeout=35, context=SSL_CONTEXT) as response:
+                    submitted = json.loads(response.read(1024 * 1024).decode("utf-8"))
             except urllib.error.HTTPError as exc:
-                try:
-                    detail = exc.read(500).decode("utf-8", "replace")
-                except Exception:
-                    detail = ""
-                error = friendly_api_error(f"HTTP {exc.code}: {detail}")
-                if exc.code in (401, 403):
-                    error += ". Проверь ключ в настройках."
-                elif exc.code == 402:
-                    error += ". Открой кабинет Pollinations и проверь баланс/лимит."
-                elif exc.code == 429:
-                    error += ". Не повторяй запросы часто; дождись сброса лимита."
-            except Exception as exc:
-                error = friendly_api_error(str(exc))
-                if isinstance(exc, InterruptedError):
-                    error = "Создание изображения отменено."
+                detail = exc.read(800).decode("utf-8", "replace")
+                raise RuntimeError(f"AI Horde не принял запрос (HTTP {exc.code}): {detail[:300]}")
+
+            request_id = submitted.get("id")
+            if not request_id:
+                raise RuntimeError("AI Horde не вернул номер задания. Попробуй ещё раз.")
+
+            # Anonymous queue may take several minutes. Poll no more often than every 3s.
+            deadline = __import__("time").monotonic() + 300
+            status = {}
+            while __import__("time").monotonic() < deadline:
+                if cancel_event and cancel_event.is_set():
+                    try:
+                        cancel_req = urllib.request.Request(
+                            base + "/generate/status/" + urllib.parse.quote(str(request_id), safe=""),
+                            headers=headers, method="DELETE")
+                        urllib.request.urlopen(cancel_req, timeout=8, context=SSL_CONTEXT).close()
+                    except Exception:
+                        pass
+                    raise InterruptedError("Создание изображения отменено.")
+                check_req = urllib.request.Request(
+                    base + "/generate/check/" + urllib.parse.quote(str(request_id), safe=""),
+                    headers={"User-Agent": UA, "Client-Agent": "AI-Chat:28:github.com/awayRu/Aish", "Accept": "application/json", "apikey": "0000000000"})
+                with urllib.request.urlopen(check_req, timeout=20, context=SSL_CONTEXT) as response:
+                    status = json.loads(response.read(1024 * 1024).decode("utf-8"))
+                if status.get("faulted"):
+                    raise RuntimeError("AI Horde не смог выполнить генерацию. Попробуй другой запрос.")
+                if status.get("done"):
+                    break
+                __import__("time").sleep(3)
+            else:
+                raise TimeoutError("AI Horde пока не нашёл свободного исполнителя. Очередь анонимных запросов может быть долгой; попробуй позже.")
+
+            status_req = urllib.request.Request(
+                base + "/generate/status/" + urllib.parse.quote(str(request_id), safe=""),
+                headers={"User-Agent": UA, "Client-Agent": "AI-Chat:28:github.com/awayRu/Aish", "Accept": "application/json", "apikey": "0000000000"})
+            with urllib.request.urlopen(status_req, timeout=30, context=SSL_CONTEXT) as response:
+                result = json.loads(response.read(2 * 1024 * 1024).decode("utf-8"))
+            generations = result.get("generations") or []
+            if not generations:
+                raise RuntimeError("Задание завершено, но AI Horde не вернул изображение.")
+            image_url = generations[0].get("img") or generations[0].get("url")
+            if not image_url or not str(image_url).startswith(("https://", "http://")):
+                raise RuntimeError("AI Horde вернул некорректную ссылку на изображение.")
+            if cancel_event and cancel_event.is_set():
+                raise InterruptedError("Создание изображения отменено.")
+
+            image_req = urllib.request.Request(str(image_url), headers={"User-Agent": UA, "Accept": "image/*"})
+            with urllib.request.urlopen(image_req, timeout=60, context=SSL_CONTEXT) as response:
+                data = response.read(15 * 1024 * 1024 + 1)
+                content_type = (response.headers.get("Content-Type") or "").lower()
+            if not data:
+                raise RuntimeError("AI Horde вернул пустой файл изображения.")
+            if len(data) > 15 * 1024 * 1024:
+                raise RuntimeError("Изображение превышает ограничение 15 МБ.")
+            if data.startswith(b"\x89PNG\r\n\x1a\n"):
+                ext = ".png"
+            elif data.startswith(b"\xff\xd8\xff"):
+                ext = ".jpg"
+            elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                ext = ".webp"
+            else:
+                raise RuntimeError("Сервис вернул файл неизвестного формата (" + content_type[:50] + ").")
+            filename = "horde_" + DT.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6] + ext
+            path = os.path.join(IMG_DIR, filename)
+            with open(path, "wb") as file:
+                file.write(data)
+        except urllib.error.URLError as exc:
+            error = "Не удалось подключиться к AI Horde. Проверь интернет и попробуй снова. " + str(exc)[:180]
+        except InterruptedError:
+            error = "Создание изображения отменено."
+        except Exception as exc:
+            error = str(exc)[:500] or type(exc).__name__
         Clock.schedule_once(lambda _dt, pth=path, err=error: callback(pth, err), 0)
+
     threading.Thread(target=worker, daemon=True).start()
 
 # ---------------------------------------------------------------------------
@@ -1106,8 +1223,9 @@ def generate_image(prompt, callback, cancel_event=None, api_key=None):
 # ---------------------------------------------------------------------------
 
 def style_button(button, bg=None, fg=None, font=14, bold=False, radius=dp(14)):
-    """Idempotent rounded button styling; repeated refreshes do not stack event handlers."""
-    button._rounded_style = {"bg": tuple(bg or T("panel3")), "radius": radius}
+    """Layered premium button style; safe to re-apply without duplicate event bindings."""
+    base_bg = tuple(bg or T("panel3"))
+    button._rounded_style = {"bg": base_bg, "radius": radius}
     button.background_normal = ""
     button.background_down = ""
     button.background_color = (0, 0, 0, 0)
@@ -1115,20 +1233,45 @@ def style_button(button, bg=None, fg=None, font=14, bold=False, radius=dp(14)):
     button.font_size = sp(font)
     button.bold = bold
     button.padding = (dp(10), dp(7))
+
     def update(*_):
         style = button._rounded_style
+        x, y = button.pos
+        w, h = button.size
+        r = min(style["radius"], max(dp(3), h / 2))
+        pressed = getattr(button, "state", "normal") == "down"
+        b = style["bg"]
+        # Subtle movement/brightness feedback instead of changing layout geometry.
+        if pressed:
+            fill = tuple(max(0.0, c * 0.84) for c in b[:3]) + (b[3] if len(b) > 3 else 1,)
+        else:
+            fill = b
+        rim_rgb = T("accent")
         button.canvas.before.clear()
         with button.canvas.before:
-            Color(*style["bg"])
-            RoundedRectangle(pos=button.pos, size=button.size, radius=[style["radius"]])
+            Color(0, 0, 0, 0.14 if STATE.get("theme") != "daylight" else 0.045)
+            RoundedRectangle(pos=(x, y - dp(1.4)), size=(w, h), radius=[r])
+            Color(rim_rgb[0], rim_rgb[1], rim_rgb[2], 0.12 if not pressed else 0.38)
+            RoundedRectangle(pos=(x, y), size=(w, h), radius=[r])
+            Color(*fill)
+            RoundedRectangle(pos=(x + dp(1), y + dp(1)),
+                             size=(max(0, w - dp(2)), max(0, h - dp(2))), radius=[max(dp(2), r - dp(1))])
+            if not pressed and h > dp(10):
+                Color(1, 1, 1, 0.055 if STATE.get("theme") != "daylight" else 0.18)
+                Line(points=[x + r * 0.7, y + h - dp(1.6), x + w - r * 0.7, y + h - dp(1.6)],
+                     width=dp(0.65))
     if not getattr(button, "_rounded_style_bound", False):
         button.bind(pos=update, size=update)
+        try:
+            button.bind(state=update)
+        except Exception:
+            pass
         def press(*_):
             if not STATE.get("performance_mode", True):
-                Animation(opacity=0.78, d=0.07).start(button)
+                Animation(opacity=0.90, d=0.06).start(button)
         def release(*_):
             if not STATE.get("performance_mode", True):
-                Animation(opacity=1, d=0.12).start(button)
+                Animation(opacity=1, d=0.10).start(button)
         button.bind(on_press=press, on_release=release)
         button._rounded_style_bound = True
     update()
@@ -1142,15 +1285,31 @@ class IconButton(ButtonBehavior, Widget):
         self.callback = callback
         self.size_px = size_px
         self.bg_key = bg_key
-        self.bind(pos=self.redraw, size=self.redraw)
+        self.bind(pos=self.redraw, size=self.redraw, state=self.redraw)
         self.redraw()
 
     def redraw(self, *_):
         self.canvas.before.clear()
         self.canvas.clear()
+        x, y = self.pos
+        w, h = self.size
+        pressed = getattr(self, "state", "normal") == "down"
         with self.canvas.before:
-            Color(*T(self.bg_key))
-            RoundedRectangle(pos=self.pos, size=self.size, radius=[self.size_px * 0.5])
+            # Shadow + luminous rim + inset surface make controls read as physical elements.
+            Color(0, 0, 0, 0.20 if STATE.get("theme") != "daylight" else 0.055)
+            RoundedRectangle(pos=(x, y-dp(1.8)), size=(w, h), radius=[self.size_px * 0.5])
+            accent = T("accent")
+            Color(accent[0], accent[1], accent[2], 0.30 if not pressed else 0.72)
+            RoundedRectangle(pos=(x-dp(0.5), y-dp(0.2)), size=(w+dp(1), h+dp(1)), radius=[self.size_px * 0.5])
+            bg = T(self.bg_key)
+            if pressed:
+                bg = tuple(c * 0.82 for c in bg[:3]) + (bg[3],)
+            Color(*bg)
+            RoundedRectangle(pos=(x+dp(1.1), y+dp(1.1)), size=(max(0,w-dp(2.2)), max(0,h-dp(2.2))),
+                             radius=[max(dp(2), self.size_px * 0.5-dp(1.1))])
+            if not pressed:
+                Color(1, 1, 1, 0.055 if STATE.get("theme") != "daylight" else 0.20)
+                Line(points=[x+w*0.31, y+h-dp(2.8), x+w*0.69, y+h-dp(2.8)], width=dp(0.7))
         with self.canvas:
             Color(*T("text"))
             cx, cy = self.center
@@ -1183,12 +1342,20 @@ class IconButton(ButtonBehavior, Widget):
                 Line(points=[cx-s*0.55, cy-s*0.05, cx-s*0.55, cy-s*0.25, cx, cy-s*0.6,
                              cx+s*0.55, cy-s*0.25, cx+s*0.55, cy-s*0.05], width=dp(1.8))
                 Line(points=[cx, cy-s*0.6, cx, cy-s*0.9], width=dp(1.8))
-            elif self.icon == "image":
-                RoundedRectangle(pos=(cx-s*0.85, cy-s*0.62), size=(s*1.7, s*1.28), radius=[dp(3)])
-                Ellipse(pos=(cx+s*0.25, cy+s*0.18), size=(s*0.28, s*0.28))
-                Line(points=[cx-s*0.68, cy-s*0.42, cx-s*0.12, cy+s*0.18, cx+s*0.10, cy-s*0.02, cx+s*0.62, cy+s*0.42], width=dp(1.8), joint="round")
             elif self.icon == "down":
                 Line(points=[cx-s*0.65, cy+s*0.25, cx, cy-s*0.4, cx+s*0.65, cy+s*0.25], width=dp(2.2), joint="round")
+            elif self.icon == "smile":
+                Line(circle=(cx, cy, s*0.95), width=dp(1.7))
+                Ellipse(pos=(cx-s*0.43, cy+s*0.18), size=(dp(2.5), dp(2.5)))
+                Ellipse(pos=(cx+s*0.25, cy+s*0.18), size=(dp(2.5), dp(2.5)))
+                Line(points=[cx-s*0.42, cy-s*0.18, cx-s*0.20, cy-s*0.38,
+                             cx+s*0.15, cy-s*0.42, cx+s*0.42, cy-s*0.16],
+                     width=dp(1.7), joint="round")
+            elif self.icon == "sparkle":
+                Line(points=[cx, cy+s, cx, cy-s], width=dp(1.9), cap="round")
+                Line(points=[cx-s, cy, cx+s, cy], width=dp(1.9), cap="round")
+                Line(points=[cx-s*0.55, cy+s*0.55, cx+s*0.55, cy-s*0.55], width=dp(1.1), cap="round")
+                Line(points=[cx-s*0.55, cy-s*0.55, cx+s*0.55, cy+s*0.55], width=dp(1.1), cap="round")
 
     def on_press(self):
         if not STATE.get("performance_mode", True):
@@ -1239,6 +1406,226 @@ class ChatChip(ButtonBehavior, BoxLayout):
 
     def on_release(self):
         if self.callback: self.callback(self.text_value)
+
+
+class BrandMark(Widget):
+    """Small, font-independent app mark built from Kivy canvas primitives."""
+    def __init__(self, size_px=dp(36), **kwargs):
+        super().__init__(size_hint=(None, None), size=(size_px, size_px), **kwargs)
+        self.bind(pos=self.redraw, size=self.redraw)
+        self.redraw()
+
+    def redraw(self, *_):
+        self.canvas.clear()
+        x, y = self.pos
+        w, h = self.size
+        cx, cy = self.center
+        r = min(w, h) * 0.47
+        a = T("accent")
+        with self.canvas:
+            Color(a[0], a[1], a[2], 0.10)
+            Ellipse(pos=(cx-r, cy-r), size=(2*r, 2*r))
+            Color(a[0], a[1], a[2], 0.22)
+            Line(circle=(cx, cy, r*0.83), width=dp(1.0))
+            Color(*T("panel3"))
+            Ellipse(pos=(cx-r*0.64, cy-r*0.64), size=(1.28*r, 1.28*r))
+            Color(*T("accent"))
+            # Minimal four-point star; no emoji font dependency.
+            Line(points=[cx, cy+r*0.42, cx+r*0.10, cy+r*0.10,
+                         cx+r*0.42, cy, cx+r*0.10, cy-r*0.10,
+                         cx, cy-r*0.42, cx-r*0.10, cy-r*0.10,
+                         cx-r*0.42, cy, cx-r*0.10, cy+r*0.10, cx, cy+r*0.42],
+                 width=dp(1.55), close=True, joint="round")
+            Color(1, 1, 1, 0.92)
+            Ellipse(pos=(cx-dp(1.2), cy-dp(1.2)), size=(dp(2.4), dp(2.4)))
+
+
+class PromptTile(ButtonBehavior, BoxLayout):
+    """Premium quick-action card with numbered badge and tactile highlight."""
+    def __init__(self, title, description, glyph, callback=None, **kwargs):
+        super().__init__(orientation="vertical", size_hint=(1, None), height=dp(69),
+                         padding=(dp(11), dp(7)), spacing=dp(2), **kwargs)
+        self.callback = callback
+        self.glyph = str(glyph)
+        self.title_text = title
+        self.description = description
+        heading = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(27), spacing=dp(8))
+        badge = BoxLayout(size_hint=(None, None), size=(dp(29), dp(25)), padding=(dp(2), dp(1)))
+        with badge.canvas.before:
+            ac = T("accent")
+            Color(ac[0], ac[1], ac[2], 0.17)
+            self._badge_bg = RoundedRectangle(pos=badge.pos, size=badge.size, radius=[dp(8)])
+            Color(ac[0], ac[1], ac[2], 0.34)
+            self._badge_rim = Line(rounded_rectangle=(badge.x, badge.y, badge.width, badge.height, dp(8)), width=dp(0.7))
+        badge.bind(pos=lambda *_: self._sync_badge(badge), size=lambda *_: self._sync_badge(badge))
+        badge.add_widget(make_label(self.glyph, 8.5, "accent", True, halign="center"))
+        heading.add_widget(badge)
+        heading.add_widget(make_label(title, 10.5, "text", True, size_hint=(1, 1)))
+        self.add_widget(heading)
+        self.add_widget(make_label(description, 9.1, "text_dim", False,
+                                   size_hint=(1, None), height=dp(19)))
+        self.bind(pos=self.redraw, size=self.redraw, state=self.redraw)
+        self.redraw()
+
+    def _sync_badge(self, badge):
+        try:
+            self._badge_bg.pos = badge.pos
+            self._badge_bg.size = badge.size
+            self._badge_rim.rounded_rectangle = (badge.x, badge.y, badge.width, badge.height, dp(8))
+        except Exception:
+            pass
+
+    def redraw(self, *_):
+        self.canvas.before.clear()
+        x, y = self.pos
+        w, h = self.size
+        pressed = getattr(self, "state", "normal") == "down"
+        accent = T("accent")
+        with self.canvas.before:
+            Color(0, 0, 0, 0.19 if STATE.get("theme") != "daylight" else 0.035)
+            RoundedRectangle(pos=(x+dp(1), y-dp(1.4)), size=(w, h), radius=[dp(15)])
+            Color(accent[0], accent[1], accent[2], 0.26 if not pressed else 0.66)
+            RoundedRectangle(pos=(x, y), size=(w, h), radius=[dp(15)])
+            fill = T("accent_soft") if pressed else T("panel2")
+            Color(*fill)
+            RoundedRectangle(pos=(x+dp(1), y+dp(1)), size=(max(0, w-dp(2)), max(0, h-dp(2))), radius=[dp(14)])
+            Color(1, 1, 1, 0.075 if not pressed else 0.12)
+            Line(points=[x+dp(16), y+h-dp(1.8), x+w-dp(16), y+h-dp(1.8)], width=dp(0.6))
+            Color(accent[0], accent[1], accent[2], 0.52 if not pressed else 0.92)
+            Line(points=[x+dp(1.5), y+dp(13), x+dp(1.5), y+h-dp(13)], width=dp(1.0))
+
+    def on_release(self):
+        if self.callback:
+            self.callback()
+
+
+class WelcomePanel(BoxLayout):
+    """Deliberate, polished empty state instead of a fake assistant chat bubble."""
+    def __init__(self, callback, **kwargs):
+        # Set defaults on kwargs before super().__init__. Passing size_hint/height both
+        # explicitly and through **kwargs raises TypeError and aborts the first empty chat.
+        kwargs.setdefault("size_hint", (1, None))
+        kwargs.setdefault("height", dp(402))
+        super().__init__(orientation="vertical", padding=(dp(12), dp(11)),
+                         spacing=dp(7), **kwargs)
+        self.callback = callback
+        self.bind(pos=self._sync_bg, size=self._sync_bg)
+        with self.canvas.before:
+            Color(0, 0, 0, 0.26 if STATE.get("theme") != "daylight" else 0.06)
+            self._shadow = RoundedRectangle(pos=(self.x+dp(1), self.y-dp(4)), size=self.size, radius=[dp(25)])
+            Color(*T("panel"))
+            self._bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(25)])
+            a = T("accent")
+            Color(a[0], a[1], a[2], 0.065 if STATE.get("theme") != "daylight" else 0.025)
+            self._glow = Ellipse(pos=(self.x + self.width*0.34, self.top-dp(126)),
+                                 size=(self.width*0.72, dp(190)))
+            teal = T("avatar_ai")
+            Color(teal[0], teal[1], teal[2], 0.028 if STATE.get("theme") != "daylight" else 0.015)
+            self._glow2 = Ellipse(pos=(self.x-dp(75), self.y+dp(18)),
+                                  size=(self.width*0.70, dp(120)))
+            Color(a[0], a[1], a[2], 0.40)
+            self._rim = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(25)),
+                             width=dp(0.9))
+
+        top = BoxLayout(size_hint=(1, None), height=dp(42), spacing=dp(9))
+        top.add_widget(BrandMark(dp(36)))
+        words = BoxLayout(orientation="vertical", spacing=0)
+        words.add_widget(make_label("AI CHAT  /  AISH", 10, "accent", True,
+                                    size_hint=(1, None), height=dp(17)))
+        words.add_widget(make_label("ТВОЙ ЛИЧНЫЙ ПОМОЩНИК", 9, "text_dim", False,
+                                    size_hint=(1, None), height=dp(17)))
+        top.add_widget(words)
+        status_pill = BoxLayout(size_hint=(None, None), size=(dp(70), dp(25)), padding=(dp(4), dp(2)))
+        with status_pill.canvas.before:
+            ok = T("success")
+            Color(ok[0], ok[1], ok[2], 0.11)
+            self._status_pill_bg = RoundedRectangle(pos=status_pill.pos, size=status_pill.size, radius=[dp(12)])
+            Color(ok[0], ok[1], ok[2], 0.23)
+            self._status_pill_rim = Line(rounded_rectangle=(status_pill.x, status_pill.y, status_pill.width, status_pill.height, dp(12)), width=dp(0.6))
+        status_pill.bind(pos=lambda *_: self._sync_status_pill(status_pill), size=lambda *_: self._sync_status_pill(status_pill))
+        status_pill.add_widget(make_label("● ГОТОВ", 7.5, "online", True, halign="center"))
+        top.add_widget(status_pill)
+        self.add_widget(top)
+        self.add_widget(make_label("Твоя идея.\nНаш следующий шаг.", 23, "text", True,
+                                   size_hint=(1, None), height=dp(61), valign="middle"))
+        self.add_widget(make_label("Разберём сложное, напишем код или превратим мысль в готовый результат.",
+                                   10.5, "text_dim", False, size_hint=(1, None), height=dp(35), valign="top"))
+        self.add_widget(make_label("БЫСТРЫЙ СТАРТ  /  ВЫБЕРИ НАПРАВЛЕНИЕ", 8.5, "accent", True,
+                                   size_hint=(1, None), height=dp(16)))
+        grid = GridLayout(cols=2, spacing=dp(8), size_hint=(1, None), height=dp(151))
+        prompts = [
+            ("Объясни тему", "Просто и с примерами", "01", "Объясни просто"),
+            ("Помоги с кодом", "Напиши и разберись", "02", "Помоги с кодом"),
+            ("Создай текст", "Идея — готовый текст", "03", "Создай текст"),
+            ("Нарисуй кота", "Генерация изображения", "04", "Нарисуй кота"),
+        ]
+        for title, desc, glyph, chip in prompts:
+            grid.add_widget(PromptTile(title, desc, glyph,
+                                       callback=lambda value=chip: self.callback(value)))
+        self.add_widget(grid)
+        self.add_widget(make_label("История хранится на устройстве · нажми на карточку или напиши запрос ниже",
+                                   9, "text_faint", False, size_hint=(1, None), height=dp(22), valign="middle"))
+
+    def _sync_bg(self, *_):
+        self._shadow.pos = (self.x+dp(1), self.y-dp(4))
+        self._shadow.size = self.size
+        self._bg.pos = self.pos
+        self._bg.size = self.size
+        self._rim.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(25))
+        self._glow.pos = (self.x + self.width*0.34, self.top-dp(126))
+        self._glow.size = (self.width*0.72, dp(190))
+        self._glow2.pos = (self.x-dp(75), self.y+dp(18))
+        self._glow2.size = (self.width*0.70, dp(120))
+
+    def _sync_status_pill(self, pill):
+        try:
+            self._status_pill_bg.pos = pill.pos
+            self._status_pill_bg.size = pill.size
+            self._status_pill_rim.rounded_rectangle = (pill.x, pill.y, pill.width, pill.height, dp(12))
+        except Exception:
+            pass
+
+
+class TypingDots(Widget):
+    """Low-cost animated three-dot indicator for waiting and streaming states."""
+    def __init__(self, **kwargs):
+        super().__init__(size_hint=(None, None), size=(dp(28), dp(18)), **kwargs)
+        self._phase = 0.0
+        self._dot_colors = []
+        self._dot_shapes = []
+        with self.canvas:
+            for _index in range(3):
+                a = T("accent")
+                color = Color(a[0], a[1], a[2], 0.45)
+                shape = Ellipse(pos=self.pos, size=(dp(4.5), dp(4.5)))
+                self._dot_colors.append(color)
+                self._dot_shapes.append(shape)
+        self.bind(pos=self._sync_dots, size=self._sync_dots)
+        self._sync_dots()
+        self._event = Clock.schedule_interval(self._tick, 1.0/18.0)
+
+    def _sync_dots(self, *_):
+        size = dp(4.5)
+        for index, shape in enumerate(self._dot_shapes):
+            shape.pos = (self.x + dp(3) + index*dp(9), self.center_y-size/2)
+            shape.size = (size, size)
+
+    def _tick(self, dt):
+        self._phase = (self._phase + max(0.0, min(float(dt), 0.1))*5.2) % (math.pi*2)
+        accent = T("accent")
+        for index, color in enumerate(self._dot_colors):
+            alpha = 0.20 + 0.72*(0.5+0.5*math.sin(self._phase-index*1.45))
+            color.rgba = (accent[0], accent[1], accent[2], alpha)
+        return True
+
+    def stop(self):
+        event = getattr(self, "_event", None)
+        if event is not None:
+            try:
+                event.cancel()
+            except Exception:
+                pass
+            self._event = None
 
 
 class RoundedPopup(ModalView):
@@ -1331,10 +1718,15 @@ class MessageBubble(BoxLayout):
         with self.bubble.canvas.before:
             Color(*T("shadow"))
             self._shadow_rect = RoundedRectangle(pos=self.bubble.pos,
-                size=self.bubble.size, radius=[dp(21)])
-            Color(*bg)
-            self._bubble_rect = RoundedRectangle(pos=self.bubble.pos,
+                size=self.bubble.size, radius=[dp(22)])
+            rim = T("accent") if is_me else T("panel3")
+            Color(rim[0], rim[1], rim[2], 0.17 if is_me else 0.58)
+            self._bubble_rim = RoundedRectangle(pos=self.bubble.pos,
                 size=self.bubble.size,
+                radius=[dp(22), dp(22), dp(7) if is_me else dp(22), dp(22)])
+            Color(*bg)
+            self._bubble_rect = RoundedRectangle(pos=(self.bubble.x + dp(0.8), self.bubble.y + dp(0.8)),
+                size=(max(0, self.bubble.width - dp(1.6)), max(0, self.bubble.height - dp(1.6))),
                 radius=[dp(21), dp(21), dp(6) if is_me else dp(21), dp(21)])
         self.bubble.bind(pos=self._sync_bubble, size=self._sync_bubble)
 
@@ -1397,17 +1789,21 @@ class MessageBubble(BoxLayout):
         Clock.schedule_once(lambda *_: self._update_height(), 0)
 
     def _sync_bubble(self, *_):
-        self._bubble_rect.pos = self.bubble.pos
-        self._bubble_rect.size = self.bubble.size
+        self._bubble_rim.pos = self.bubble.pos
+        self._bubble_rim.size = self.bubble.size
+        self._bubble_rect.pos = (self.bubble.x + dp(0.8), self.bubble.y + dp(0.8))
+        self._bubble_rect.size = (max(0, self.bubble.width - dp(1.6)), max(0, self.bubble.height - dp(1.6)))
         self._shadow_rect.pos = (self.bubble.x + dp(1), self.bubble.y - dp(2))
         self._shadow_rect.size = self.bubble.size
 
     def _layout_width(self, *_):
         if not hasattr(self, "bubble") or self.width <= dp(30):
             return
-        # Keep comfortable side margins even on narrow Android screens.
+        # Keep comfortable margins on phones and prevent overly wide text bubbles on tablets.
         max_width = max(dp(130), self.width - dp(70))
-        self.bubble.width = min(self.width * 0.80, max_width)
+        if Window.width > Window.height and Window.width > dp(900):
+            max_width = min(max_width, dp(820))
+        self.bubble.width = min(self.width * 0.84, max_width)
         if self.image_preview is not None:
             self.image_preview.height = min(dp(230), max(dp(150), self.bubble.width - dp(24)))
         self._body_width(self.body, self.body.width)
@@ -1447,7 +1843,15 @@ class MessageBubble(BoxLayout):
                 pass
 
     def append(self, piece):
-        self.set_text(self.text + piece, force_update=False)
+        """Append escaped plain text efficiently; apply rich Markdown once at completion."""
+        if not piece:
+            return
+        self.text += str(piece)
+        self.body.text = _kivy_escape(self.text)
+        self.body.font_name = font_path()
+        self.body.font_size = F("body")
+        self.body.bold = STATE.get("font_weight") == "bold"
+        Clock.schedule_once(lambda *_: self._update_height(), 0)
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos) and self.on_long_cb:
@@ -1518,24 +1922,55 @@ class ChatRoot(BoxLayout):
         self._stream_flush_scheduled = False
         self._stream_queue_lock = threading.Lock()
         self._at_bottom = True
-        self.pending_image = ""
-        self._file_popup = None
         self._chips_requested = True
         self._keyboard_visible = False
         self._keyboard_listener = None
+        self._is_landscape = Window.width > Window.height
+        self._welcome_panel = None
         self._build_ui()
+        Clock.schedule_once(self._sync_background, 0)
         self.keyboard_spacer = Widget(size_hint=(1, None), height=0)
         self.add_widget(self.keyboard_spacer)
+        Window.bind(size=self._adapt_orientation)
         Clock.schedule_once(lambda *_: self._install_android_keyboard_listener(), 0.7)
-        Clock.schedule_once(lambda *_: self.load_chat(), 0.12)
+        Clock.schedule_once(self._safe_initial_load, 0.12)
+
+    def _safe_initial_load(self, *_args):
+        """Keep the UI alive if history/empty-state construction encounters a runtime error."""
+        try:
+            self.load_chat()
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            detail = f"{type(exc).__name__}: {exc}"[:150]
+            print("[Startup] Initial chat load failed:", detail)
+            try:
+                self.messages_box.clear_widgets()
+                self.messages_box.add_widget(make_label(
+                    "Не удалось загрузить чат\n" + detail + "\n\nПопробуй нажать «Новый чат».",
+                    12, "danger", size_hint=(1, None), height=dp(100), valign="middle"))
+                self.toast("Ошибка загрузки истории: " + detail[:80])
+            except Exception:
+                pass
 
     def dispose(self):
-        """Detach the Android keyboard listener before rebuilding the root widget."""
+        """Detach listeners and background animation before root is destroyed or rebuilt."""
+        event = getattr(self, "_spark_event", None)
+        if event is not None:
+            try:
+                event.cancel()
+            except Exception:
+                pass
+            self._spark_event = None
+        try:
+            Window.unbind(size=self._adapt_orientation)
+        except Exception:
+            pass
         listener = getattr(self, "_keyboard_listener", None)
         if listener is not None:
             try:
                 from jnius import autoclass
-                Activity = autoclass("org.kivy.android.PythonActivity")
+                Activity = autoclass("org.renpy.android.PythonActivity")
                 decor = Activity.mActivity.getWindow().getDecorView()
                 decor.getViewTreeObserver().removeOnGlobalLayoutListener(listener)
             except Exception:
@@ -1545,31 +1980,71 @@ class ChatRoot(BoxLayout):
     def _build_ui(self):
         # A single base surface avoids hard horizontal colour bands on tall phones.
         with self.canvas.before:
-            Color(*T("bg_bot")); self.bg_top_rect = Rectangle(pos=self.pos, size=self.size)
+            # A subtle 30-band gradient replaces the flat purple field on tall screens.
+            self._bg_bands = []
+            bot = T("bg_bot")
+            top = T("bg_top")
+            for band_index in range(30):
+                ratio = band_index / 29.0
+                rgba = tuple(bot[channel]*(1.0-ratio)+top[channel]*ratio for channel in range(3)) + (1.0,)
+                band_color = Color(*rgba)
+                band_rect = Rectangle(pos=self.pos, size=self.size)
+                self._bg_bands.append((ratio, band_color, band_rect))
             glow = T("accent")
-            Color(glow[0], glow[1], glow[2], 0.045)
-            self.bg_glow = Ellipse(pos=(self.x - dp(90), self.top - dp(300)),
-                                   size=(self.width + dp(180), dp(470)))
+            Color(glow[0], glow[1], glow[2], 0.062 if STATE.get("theme") != "daylight" else 0.02)
+            self.bg_glow = Ellipse(pos=(self.x-dp(90), self.top-dp(300)), size=(self.width+dp(180), dp(470)))
+            cool = T("avatar_ai")
+            Color(cool[0], cool[1], cool[2], 0.030 if STATE.get("theme") != "daylight" else 0.012)
+            self.bg_glow_2 = Ellipse(pos=(self.right-dp(220), self.y+dp(45)), size=(self.width*0.82, dp(310)))
+            # Fine, low-alpha particle trails: decorative without overpowering chat content.
+            self._spark_particles = []
+            particle_count = 34 if not STATE.get("performance_mode", True) else 28
+            for _spark_index in range(particle_count):
+                sx, sy = random.random(), random.random()
+                brightness = random.uniform(0.10, 0.34)
+                spark_color = Color(*T("accent")[:3], brightness)
+                spark_len = dp(random.uniform(3.0, 8.0))
+                spark_line = Line(points=[0, 0, 0, 0], width=dp(random.choice([0.55, 0.75, 0.9])))
+                spark_dot = Ellipse(pos=(0, 0), size=(dp(1.2), dp(1.2)))
+                self._spark_particles.append({
+                    "x": sx, "y": sy, "speed": random.uniform(0.038, 0.105),
+                    "tilt": dp(random.uniform(-1.7, 1.7)), "length": spark_len,
+                    "alpha": brightness, "color": spark_color, "line": spark_line, "dot": spark_dot,
+                })
         self.bind(pos=self._sync_background, size=self._sync_background)
+        self._spark_event = None
+        if STATE.get("sparkle_background", True):
+            self._spark_event = Clock.schedule_interval(self._animate_sparks, 1.0 / 30.0)
 
-        header = BoxLayout(size_hint=(1, None), height=dp(66), padding=(dp(11), dp(9)), spacing=dp(7))
+        header = BoxLayout(size_hint=(1, None), height=dp(70), padding=(dp(12), dp(8)), spacing=dp(7))
+        self.header_widget = header
         with header.canvas.before:
             Color(*T("panel")); self.header_rect = Rectangle(pos=header.pos, size=header.size)
         header.bind(pos=lambda *_: setattr(self.header_rect, "pos", header.pos),
                     size=lambda *_: setattr(self.header_rect, "size", header.size))
-        header.add_widget(IconButton("plus", self.new_chat, dp(40)))
-        header.add_widget(IconButton("search", self.open_search, dp(40)))
-        center = BoxLayout(orientation="vertical", spacing=0)
+        with header.canvas.after:
+            accent = T("accent")
+            Color(accent[0], accent[1], accent[2], 0.42)
+            self.header_accent_line = Rectangle(pos=(header.x, header.y), size=(header.width, dp(0.8)))
+        header.bind(pos=lambda *_: setattr(self.header_accent_line, "pos", (header.x, header.y)),
+                    size=lambda *_: setattr(self.header_accent_line, "size", (header.width, dp(0.8))))
+        header.add_widget(IconButton("plus", self.new_chat, dp(38), bg_key="panel2"))
+        header.add_widget(IconButton("search", self.open_search, dp(38), bg_key="panel2"))
+        center = BoxLayout(orientation="horizontal", spacing=dp(7), size_hint=(1, 1))
+        center.add_widget(BrandMark(dp(33)))
+        title_stack = BoxLayout(orientation="vertical", spacing=0)
         self.title_lbl = Label(text="AI Чат", color=T("text"), bold=True, font_size=F("title"),
-                               halign="center", valign="bottom", shorten=True)
+                               halign="left", valign="bottom", shorten=True)
         self.title_lbl.bind(size=lambda *_: setattr(self.title_lbl, "text_size", self.title_lbl.size))
-        self.status_lbl = Label(text="готов к работе", color=T("online"), font_size=sp(10),
-                                halign="center", valign="top", shorten=True)
+        self.status_lbl = Label(text="ГОТОВ К РАБОТЕ", color=T("online"), font_size=sp(8),
+                                halign="left", valign="top", shorten=True)
         self.status_lbl.bind(size=lambda *_: setattr(self.status_lbl, "text_size", self.status_lbl.size))
-        center.add_widget(self.title_lbl); center.add_widget(self.status_lbl)
+        title_stack.add_widget(self.title_lbl)
+        title_stack.add_widget(self.status_lbl)
+        center.add_widget(title_stack)
         header.add_widget(center)
-        header.add_widget(IconButton("gear", self.open_settings, dp(40)))
-        header.add_widget(IconButton("menu", self.open_menu, dp(40)))
+        header.add_widget(IconButton("gear", self.open_settings, dp(38), bg_key="panel2"))
+        header.add_widget(IconButton("menu", self.open_menu, dp(38), bg_key="panel2"))
         self.add_widget(header)
 
         self.scroll = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"])
@@ -1580,225 +2055,231 @@ class ChatRoot(BoxLayout):
         self.scroll.add_widget(self.messages_box)
         self.add_widget(self.scroll)
 
-        self.bottom_bar = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(128), spacing=dp(2))
+        self.bottom_bar = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(128), spacing=dp(0))
         self.chips_scroll = ScrollView(size_hint=(1, None), height=dp(48), do_scroll_x=True, do_scroll_y=False, bar_width=0, scroll_type=["content"])
         self.chips = BoxLayout(size_hint=(None, None), height=dp(46), spacing=dp(8), padding=(dp(10), dp(4)))
         self.chips.bind(minimum_width=self.chips.setter("width"))
         self.chips_scroll.add_widget(self.chips)
         self.bottom_bar.add_widget(self.chips_scroll)
 
-        # Pending photo is shown as a compact, removable attachment strip.
-        self.attachment_bar = BoxLayout(size_hint=(1, None), height=0,
-                                        padding=(dp(12), dp(3)), spacing=dp(8))
-        self.attachment_bar.opacity = 0
-        self.bottom_bar.add_widget(self.attachment_bar)
-
-        composer = BoxLayout(size_hint=(1, None), height=dp(76), padding=(dp(9), dp(10)), spacing=dp(7))
+        composer = BoxLayout(size_hint=(1, None), height=dp(76), padding=(dp(13), dp(10)), spacing=dp(8))
         with composer.canvas.before:
-            Color(*T("panel")); self.composer_rect = Rectangle(pos=composer.pos, size=composer.size)
-        composer.bind(pos=lambda *_: setattr(self.composer_rect, "pos", composer.pos),
-                      size=lambda *_: setattr(self.composer_rect, "size", composer.size))
-        composer.add_widget(IconButton("image", self.choose_image, dp(40)))
+            Color(0, 0, 0, 0.20 if STATE.get("theme") != "daylight" else 0.04)
+            self.composer_shadow = RoundedRectangle(pos=(composer.x+dp(6), composer.y+dp(2)),
+                size=(max(0,composer.width-dp(12)), max(0,composer.height-dp(8))), radius=[dp(27)])
+            ac = T("accent")
+            self.composer_frame_color = Color(ac[0], ac[1], ac[2], 0.16)
+            self.composer_frame = Line(rounded_rectangle=(composer.x+dp(6), composer.y+dp(4),
+                max(0,composer.width-dp(12)), max(0,composer.height-dp(8)), dp(26)), width=dp(0.8))
+            Color(*T("panel"))
+            self.composer_rect = RoundedRectangle(pos=(composer.x+dp(7), composer.y+dp(5)),
+                size=(max(0,composer.width-dp(14)), max(0,composer.height-dp(10))), radius=[dp(25)])
+        composer.bind(pos=self._sync_composer_skin, size=self._sync_composer_skin)
+        # Text-first composer: no broken camera/photo controls. The smile icon is drawn with canvas primitives.
+        emoji_button = IconButton("smile", self.open_emoji_picker, dp(39), bg_key="panel2")
+        composer.add_widget(emoji_button)
         if ANDROID:
             composer.add_widget(IconButton("mic", self.voice_click, dp(40)))
-        self.input_wrap = BoxLayout(padding=(dp(13), dp(8)))
+        self.input_wrap = BoxLayout(padding=(dp(12), dp(8)))
         with self.input_wrap.canvas.before:
-            Color(*T("panel2")); self.input_rect = RoundedRectangle(pos=self.input_wrap.pos,
-                size=self.input_wrap.size, radius=[dp(22)])
-        self.input_wrap.bind(pos=lambda *_: setattr(self.input_rect, "pos", self.input_wrap.pos),
-                             size=lambda *_: setattr(self.input_rect, "size", self.input_wrap.size))
+            Color(0, 0, 0, 0.10)
+            self.input_shadow = RoundedRectangle(pos=self.input_wrap.pos, size=self.input_wrap.size, radius=[dp(23)])
+            ac = T("accent")
+            self.input_border_color = Color(ac[0], ac[1], ac[2], 0.16)
+            self.input_border = Line(rounded_rectangle=(self.input_wrap.x, self.input_wrap.y,
+                self.input_wrap.width, self.input_wrap.height, dp(22)), width=dp(0.75))
+            Color(*T("panel2"))
+            self.input_rect = RoundedRectangle(pos=(self.input_wrap.x+dp(1), self.input_wrap.y+dp(1)),
+                size=(max(0,self.input_wrap.width-dp(2)), max(0,self.input_wrap.height-dp(2))), radius=[dp(21)])
+        self.input_wrap.bind(pos=self._sync_input_skin, size=self._sync_input_skin)
         self.input = TextInput(hint_text="Напиши сообщение…", multiline=False, font_size=F("body"),
                                foreground_color=T("text"), cursor_color=T("accent"),
                                hint_text_color=T("text_dim"), background_normal="",
                                background_active="", background_color=(0, 0, 0, 0),
-                               padding=(dp(3), dp(7)), write_tab=False)
-        self.input.bind(on_text_validate=self.send)
+                               padding=(dp(3), dp(7)), write_tab=False,
+                               input_type="text", keyboard_suggestions=True)
+        self.input.bind(on_text_validate=self.send, focus=self._input_focus_changed)
         self.input_wrap.add_widget(self.input)
         composer.add_widget(self.input_wrap)
-        self.action_slot = BoxLayout(size_hint=(None, 1), width=dp(50))
-        self.send_button = IconButton("send", self.send, dp(48), bg_key="accent")
-        self.stop_button = IconButton("stop", self.stop_generation, dp(48), bg_key="danger")
+        self.action_slot = BoxLayout(size_hint=(None, 1), width=dp(47))
+        self.send_button = IconButton("send", self.send, dp(45), bg_key="accent")
+        self.stop_button = IconButton("stop", self.stop_generation, dp(45), bg_key="danger")
         self.action_slot.add_widget(self.send_button)
         composer.add_widget(self.action_slot)
+        self.composer_widget = composer
         self.bottom_bar.add_widget(composer)
         self.add_widget(self.bottom_bar)
         self._build_chips()
+        self._adapt_orientation()
 
-    def choose_image(self):
-        """Open the Android file picker or a built-in image browser."""
+    def _sync_composer_skin(self, *_):
         try:
-            from plyer import filechooser
-            filechooser.open_file(on_selection=self._on_file_selected,
-                                  filters=["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.bmp"])
-            return
+            composer = self.composer_widget
+            pos = (composer.x+dp(6), composer.y+dp(4))
+            size = (max(0,composer.width-dp(12)), max(0,composer.height-dp(8)))
+            self.composer_shadow.pos = (composer.x+dp(6), composer.y+dp(2))
+            self.composer_shadow.size = size
+            self.composer_frame.rounded_rectangle = (pos[0], pos[1], size[0], size[1], dp(26))
+            self.composer_rect.pos = (composer.x+dp(7), composer.y+dp(5))
+            self.composer_rect.size = (max(0,composer.width-dp(14)), max(0,composer.height-dp(10)))
         except Exception:
             pass
-        self._open_builtin_image_picker()
 
-    def _open_builtin_image_picker(self):
-        roots = ["/storage/emulated/0/DCIM", "/storage/emulated/0/Pictures",
-                 "/storage/emulated/0/Download", "/storage/emulated/0"]
-        start_path = next((path for path in roots if os.path.isdir(path)), os.path.expanduser("~"))
-        popup = RoundedPopup(size_hint=(0.96, 0.90))
-        popup.container.add_widget(make_label("Выбрать изображение", 19, bold=True,
-                                              size_hint=(1, None), height=dp(38)))
-        chooser = FileChooserIconView(path=start_path, filters=["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.bmp"],
-                                      dirselect=False, multiselect=False)
-        popup.container.add_widget(chooser)
-        row = BoxLayout(size_hint=(1, None), height=dp(48), spacing=dp(8))
-        choose = popup_button("Выбрать", lambda: select_file(), "accent")
-        cancel = popup_button("Отмена", popup.dismiss)
-        row.add_widget(choose); row.add_widget(cancel)
-        popup.container.add_widget(row)
-        def select_file():
-            if chooser.selection:
-                selected = chooser.selection[0]
+    def _sync_input_skin(self, *_):
+        try:
+            wrap = self.input_wrap
+            self.input_shadow.pos = wrap.pos
+            self.input_shadow.size = wrap.size
+            self.input_border.rounded_rectangle = (wrap.x, wrap.y, wrap.width, wrap.height, dp(22))
+            self.input_rect.pos = (wrap.x+dp(1), wrap.y+dp(1))
+            self.input_rect.size = (max(0,wrap.width-dp(2)), max(0,wrap.height-dp(2)))
+        except Exception:
+            pass
+
+    def _input_focus_changed(self, _widget, focused):
+        try:
+            ac = T("accent")
+            current = self.input_border_color.rgba
+            self.input_border_color.rgba = (ac[0], ac[1], ac[2], 0.62 if focused else 0.16)
+            self.composer_frame_color.rgba = (ac[0], ac[1], ac[2], 0.28 if focused else 0.16)
+        except Exception:
+            pass
+
+    def _adapt_orientation(self, *_):
+        """Tighten vertical chrome in landscape; all Kivy children remain resize-aware."""
+        landscape = Window.width > Window.height
+        self._is_landscape = landscape
+        try:
+            self.header_widget.height = dp(58 if landscape else 66)
+            self.chips_scroll.height = dp(38 if landscape else 48) if getattr(self, "_chips_requested", True) and not getattr(self, "_keyboard_visible", False) and STATE.get("show_suggestions", True) else 0
+            self.chips.height = dp(38 if landscape else 46)
+            self.chips.padding = (dp(10), dp(0) if landscape else dp(4))
+            self.composer_widget.height = dp(66 if landscape else 76)
+            self.composer_widget.padding = (dp(9), dp(7) if landscape else dp(10))
+            chips_h = dp(38 if landscape else 48) if self.chips_scroll.height > 0 else 0
+            self.bottom_bar.height = self.composer_widget.height + chips_h
+        except Exception:
+            pass
+
+    def open_emoji_picker(self, *_):
+        """Show a font-safe picker; ASCII faces/symbols avoid missing-glyph boxes on Android."""
+        # Deliberately use ASCII characters only. Some bundled Kivy fonts do not contain
+        # emoji glyphs, which Android/SDL then displays as crossed-out square placeholders.
+        symbols = [
+            # Emoticons
+            ":)", ":-)", ":D", ":-D", ";)", ";-)", ":P", ":-P",
+            ":(", ":-(", ":'(", ">:(", ":O", ":-O", ":|", ":-|",
+            "xD", "XD", "^_^", "^-^", "o_O", "O_O", "T_T", "-_-",
+            "<3", "</3", "<33", "(Y)", "(N)", r"\o/", "^^", "._.",
+            # Punctuation and common symbols
+            "!", "?", "...", "--", "->", "<-", "^", "v",
+            "+", "-", "*", "/", "=", "#", "@", "$",
+            "%", "&", "(", ")", "[", "]", "{", "}",
+            "<", ">", "|", "\\", "~", "`", "'", '"',
+            ":", ";", ",", ".", "!?!", "***", "###", "???",
+            # Handy text-form math/format symbols
+            "<=", ">=", "!=", "==", "+=", "%=", "x^2", "a/b",
+            "1/2", "1/3", "1/4", "10^2", "( )", "[ ]", "{ }", "< >",
+        ]
+        popup = RoundedPopup(size_hint=(0.94, None),
+                             height=min(dp(430), max(dp(300), Window.height - dp(30))))
+        popup.container.add_widget(make_label(
+            "Смайлики и символы", 18, bold=True,
+            size_hint=(1, None), height=dp(38)))
+        popup.container.add_widget(make_label(
+            "Нажми на смайлик или символ — он вставится в поле сообщения.",
+            10, "text_dim", size_hint=(1, None), height=dp(30)))
+        scroll = ScrollView(do_scroll_x=False, bar_width=dp(2))
+        grid = GridLayout(cols=4, spacing=dp(6), padding=(dp(2), dp(5)),
+                          size_hint_y=None)
+        grid.bind(minimum_height=grid.setter("height"))
+        for symbol in symbols:
+            button = Button(text=symbol, font_size=sp(16),
+                            size_hint=(1, None), height=dp(44),
+                            background_normal="", background_down="")
+            style_button(button, T("panel3"), T("text"), 16, False, dp(10))
+            def insert_symbol(_button, value=symbol):
+                try:
+                    self.input.focus = True
+                    self.input.insert_text(value)
+                except Exception:
+                    # Fallback for unusual keyboard/cursor states.
+                    self.input.text = self.input.text + value
                 popup.dismiss()
-                self._on_file_selected([selected])
-            else:
-                self.toast("Сначала выбери файл")
-        self._file_popup = popup
+            button.bind(on_release=insert_symbol)
+            grid.add_widget(button)
+        scroll.add_widget(grid)
+        popup.container.add_widget(scroll)
+        popup.container.add_widget(popup_button("Закрыть", popup.dismiss, "default"))
         popup.open()
 
-    def _on_file_selected(self, selection):
-        if not selection:
-            return
-        source = selection[0] if isinstance(selection, (list, tuple)) else selection
-        if not source:
-            return
-        source = str(source)
-        if source.startswith("content://"):
+    def _set_sparkles_enabled(self, enabled):
+        """Start or stop the background animation immediately to respect battery preference."""
+        event = getattr(self, "_spark_event", None)
+        if enabled and event is None:
+            self._spark_event = Clock.schedule_interval(self._animate_sparks, 1.0 / 30.0)
+        elif not enabled and event is not None:
             try:
-                from jnius import autoclass
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                Uri = autoclass("android.net.Uri")
-                activity = PythonActivity.mActivity
-                stream = activity.getContentResolver().openInputStream(Uri.parse(source))
-                if stream is None:
-                    raise IOError("Android не открыл выбранное фото")
-                local_path = os.path.join(IMG_DIR, "upload_" + uuid.uuid4().hex[:10] + ".img")
-                # Java InputStream byte reads via a fixed-size signed-byte array.
-                from jnius import jarray, jbyte
-                buf = jarray(jbyte)(8192)
+                event.cancel()
+            except Exception:
                 try:
-                    count = stream.read(buf)
-                    with open(local_path, "wb") as local_file:
-                        while count > 0:
-                            local_file.write(bytes((int(x) & 255) for x in buf[:count]))
-                            count = stream.read(buf)
-                finally:
-                    try: stream.close()
-                    except Exception: pass
-                source = local_path
-            except Exception as exc:
-                Clock.schedule_once(lambda *_args, msg=str(exc)[:70]: self.toast("Не удалось прочитать фото: " + msg), 0)
-                return
-        if not os.path.isfile(source):
-            Clock.schedule_once(lambda *_: self.toast("Не удалось открыть файл. Проверь разрешение на файлы."), 0)
-            return
-        ext = os.path.splitext(source)[1].lower()
-        if ext == ".img":
-            # Content URI doesn't carry an extension; inspect the file signature.
+                    Clock.unschedule(self._animate_sparks)
+                except Exception:
+                    pass
+            self._spark_event = None
+            for particle in getattr(self, "_spark_particles", []):
+                try:
+                    rgb = T("accent")
+                    particle["color"].rgba = (rgb[0], rgb[1], rgb[2], 0)
+                except Exception:
+                    pass
+
+    def _animate_sparks(self, dt):
+        """Move small accent-colored streaks downward behind the conversation."""
+        if not STATE.get("sparkle_background", True):
+            return True
+        width = max(1.0, float(self.width))
+        height = max(1.0, float(self.height))
+        accent = T("accent")
+        for particle in getattr(self, "_spark_particles", []):
+            particle["y"] -= particle["speed"] * max(0.0, min(float(dt), 0.08))
+            if particle["y"] < -0.04:
+                particle["y"] = random.uniform(1.00, 1.14)
+                particle["x"] = random.random()
+                particle["alpha"] = random.uniform(0.18, 0.62)
+            x = self.x + particle["x"] * width
+            y = self.y + particle["y"] * height
+            length = particle["length"]
+            tilt = particle["tilt"]
             try:
-                with open(source, "rb") as f:
-                    sig = f.read(12)
-                if sig.startswith(b"\x89PNG\r\n\x1a\n"): ext = ".png"
-                elif sig.startswith(b"\xff\xd8\xff"): ext = ".jpg"
-                elif sig[:4] == b"RIFF" and sig[8:12] == b"WEBP": ext = ".webp"
-                elif sig.startswith((b"GIF87a", b"GIF89a")): ext = ".gif"
-                else: raise ValueError("неизвестный формат изображения")
-                renamed = source + ext
-                os.replace(source, renamed)
-                source = renamed
-            except Exception as exc:
-                Clock.schedule_once(lambda *_args, msg=str(exc)[:70]: self.toast("Неподдерживаемый файл: " + msg), 0)
-                return
-        if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
-            Clock.schedule_once(lambda *_: self.toast("Выбери изображение PNG, JPG, WEBP или GIF"), 0)
-            return
-        try:
-            dest = os.path.join(IMG_DIR, "upload_" + DT.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6] + ext)
-            if os.path.abspath(source) != os.path.abspath(dest):
-                shutil.copy2(source, dest)
-            Clock.schedule_once(lambda *_args, path=dest: self._set_pending_image(path), 0)
-        except Exception as exc:
-            message = str(exc)[:70]
-            Clock.schedule_once(lambda *_args, msg=message: self.toast("Не удалось скопировать фото: " + msg), 0)
-
-    def _set_pending_image(self, path, notify=True):
-        if not path or not os.path.isfile(path):
-            if notify:
-                self.toast("Файл изображения не найден")
-            return
-        self.pending_image = path
-        self.attachment_bar.clear_widgets()
-        thumb = PreviewImage(source=path, callback=lambda p=path: self.show_image(p),
-                             size_hint=(None, None), size=(dp(42), dp(42)))
-        self.attachment_bar.add_widget(thumb)
-        info = BoxLayout(orientation="vertical", spacing=0)
-        info.add_widget(make_label("Фото прикреплено", 11, bold=True,
-                                   size_hint=(1, 0.55)))
-        info.add_widget(make_label(os.path.basename(path)[:32], 9, "text_dim",
-                                   size_hint=(1, 0.45)))
-        self.attachment_bar.add_widget(info)
-        remove = popup_button("×", self._clear_pending_image, "danger", dp(38))
-        remove.size_hint = (None, None); remove.width = dp(42)
-        self.attachment_bar.add_widget(remove)
-        self._refresh_bottom_layout()
-        if notify:
-            self.toast("Фото прикреплено. Добавь вопрос и отправь")
-
-    def _clear_pending_image(self):
-        self.pending_image = ""
-        self.attachment_bar.clear_widgets()
-        self._refresh_bottom_layout()
-
-    def _make_multimodal_messages(self, messages, image_path):
-        """Attach a resized data URL for a vision-capable OpenAI-compatible model."""
-        if not image_path or not os.path.isfile(image_path):
-            raise ValueError("Прикреплённое изображение больше недоступно. Выбери его ещё раз.")
-        source = image_path
-        # Phone camera photos are often huge. Pillow is included with most Kivy builds;
-        # if unavailable, the original image is used when it is already small enough.
-        try:
-            from PIL import Image, ImageOps
-            with Image.open(image_path) as im:
-                im = ImageOps.exif_transpose(im).convert("RGB")
-                im.thumbnail((1600, 1600))
-                prepared = os.path.join(IMG_DIR, "vision_" + uuid.uuid4().hex[:10] + ".jpg")
-                im.save(prepared, "JPEG", quality=82, optimize=True)
-                source = prepared
-        except Exception:
-            pass
-        size = os.path.getsize(source)
-        if size > 7 * 1024 * 1024:
-            raise ValueError("Фото больше 7 МБ даже после сжатия. Выбери фото поменьше.")
-        with open(source, "rb") as handle:
-            encoded = base64.b64encode(handle.read()).decode("ascii")
-        mime = mimetypes.guess_type(source)[0] or "image/jpeg"
-        attached = False
-        for message in reversed(messages):
-            if message.get("role") == "user":
-                prior = message.get("content", "")
-                message["content"] = [
-                    {"type": "text", "text": str(prior) or "Опиши это изображение."},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}", "detail": "high"}},
-                ]
-                attached = True
-                break
-        if not attached:
-            raise ValueError("Не найдено сообщение пользователя, к которому можно прикрепить фото.")
-        return messages
+                particle["line"].points = [x, y + length, x + tilt, y]
+                particle["dot"].pos = (x - dp(0.7), y - dp(0.7))
+                particle["color"].rgba = (accent[0], accent[1], accent[2], particle["alpha"])
+            except Exception:
+                continue
+        return True
 
     def _sync_background(self, *_):
-        self.bg_top_rect.pos = self.pos
-        self.bg_top_rect.size = self.size
-        self.bg_glow.pos = (self.x - dp(90), self.top - dp(300))
-        self.bg_glow.size = (self.width + dp(180), dp(470))
+        """Resize the gradient and atmospheric glows without allocating canvas objects."""
+        width = max(0.0, float(self.width))
+        height = max(0.0, float(self.height))
+        bot, top = T("bg_bot"), T("bg_top")
+        bands = getattr(self, "_bg_bands", [])
+        count = max(1, len(bands))
+        band_height = height/count + dp(0.8)
+        for index, (_ratio, color_instruction, rect) in enumerate(bands):
+            ratio = (index+0.5)/count
+            color_instruction.rgba = tuple(bot[ch]*(1.0-ratio)+top[ch]*ratio for ch in range(3)) + (1.0,)
+            rect.pos = (self.x, self.y + index*height/count)
+            rect.size = (width, band_height)
+        self.bg_glow.pos = (self.x-dp(90), self.top-dp(300))
+        self.bg_glow.size = (width+dp(180), dp(470))
+        self.bg_glow_2.pos = (self.right-dp(220), self.y+dp(45))
+        self.bg_glow_2.size = (width*0.82, dp(310))
 
     def _build_chips(self):
         self.chips.clear_widgets()
-        for text in ("Интересный факт", "Помоги с кодом", "Посчитай 15*7", "Нарисуй кота"):
+        for text in ("Объясни просто", "Помоги с кодом", "Сократи текст", "Посчитай 15*7", "Нарисуй кота", "Перевод"):
             self.chips.add_widget(ChatChip(text, self.use_chip))
 
     def _set_chips_visible(self, visible):
@@ -1808,11 +2289,15 @@ class ChatRoot(BoxLayout):
 
     def _refresh_bottom_layout(self):
         visible = self._chips_requested and not self._keyboard_visible and STATE.get("show_suggestions", True)
-        self.chips_scroll.height = dp(48) if visible else 0
-        attach_h = dp(52) if self.pending_image else 0
-        self.attachment_bar.height = attach_h
-        self.attachment_bar.opacity = 1 if attach_h else 0
-        self.bottom_bar.height = dp(76) + (dp(48) if visible else 0) + attach_h
+        landscape = Window.width > Window.height
+        chips_h = dp(38 if landscape else 48)
+        composer_h = dp(66 if landscape else 76)
+        self.chips_scroll.height = chips_h if visible else 0
+        self.chips.height = dp(38 if landscape else 46)
+        self.chips.padding = (dp(10), dp(0) if landscape else dp(4))
+        self.composer_widget.height = composer_h
+        self.composer_widget.padding = (dp(9), dp(7) if landscape else dp(10))
+        self.bottom_bar.height = composer_h + (chips_h if visible else 0)
 
     def _keyboard_size_changed(self, pixel_height):
         """Move only the composer above the Android keyboard; don't pan the chat."""
@@ -1832,7 +2317,7 @@ class ChatRoot(BoxLayout):
         """Use Android's visible display frame because SDL2 Window.keyboard_height is 0 on Android."""
         try:
             from jnius import autoclass, PythonJavaClass, java_method
-            Activity = autoclass("org.kivy.android.PythonActivity")
+            Activity = autoclass("org.renpy.android.PythonActivity")
             Rect = autoclass("android.graphics.Rect")
             activity = Activity.mActivity
             decor = activity.getWindow().getDecorView()
@@ -1882,10 +2367,12 @@ class ChatRoot(BoxLayout):
         self.stream_bubble = None
         self._remove_typing()
         records = db_messages(sid=SESSION_ID)
+        self._welcome_panel = None
         if not records:
-            self._set_chips_visible(True)
+            self._set_chips_visible(False)
             self.title_lbl.text = "AI Чат"
-            self.add_message("ai", "Привет! Я твой ИИ-помощник.\nЗадай вопрос или выбери подсказку ниже.")
+            self._welcome_panel = WelcomePanel(self.use_chip)
+            self.messages_box.add_widget(self._welcome_panel)
         else:
             self._set_chips_visible(False)
             for row in records:
@@ -1911,8 +2398,15 @@ class ChatRoot(BoxLayout):
 
     def add_message(self, role, text, ts="", msg_id=0, starred=False,
                     interrupted=False, image_path="", animate=True):
+        welcome = getattr(self, "_welcome_panel", None)
+        if welcome is not None:
+            try:
+                self.messages_box.remove_widget(welcome)
+            except Exception:
+                pass
+            self._welcome_panel = None
         animate = bool(animate and STATE.get("message_animations", True)
-                       and not STATE.get("performance_mode", True))
+                       and (not STATE.get("performance_mode", True) or role == "ai"))
         bubble = MessageBubble(role, text, ts=ts, msg_id=msg_id, starred=starred,
                                interrupted=interrupted, image_path=image_path,
                                on_action=self.open_message_actions,
@@ -1954,16 +2448,41 @@ class ChatRoot(BoxLayout):
     def _show_typing(self):
         if self.typing is not None:
             return
-        row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(38), padding=(dp(18), dp(2)))
-        label = Label(text="ИИ формирует ответ  ·  ·  ·", color=T("text_dim"), font_size=sp(12), halign="left")
-        label.bind(size=lambda *_: setattr(label, "text_size", label.size))
-        row.add_widget(label)
+        row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(43),
+                        padding=(dp(14), dp(4)), spacing=dp(8))
+        with row.canvas.before:
+            Color(T("panel")[0], T("panel")[1], T("panel")[2], 0.72)
+            row._typing_bg = RoundedRectangle(pos=row.pos, size=row.size, radius=[dp(18)])
+            a = T("accent")
+            Color(a[0], a[1], a[2], 0.24)
+            row._typing_rim = Line(rounded_rectangle=(row.x, row.y, row.width, row.height, dp(18)), width=dp(0.7))
+        row.bind(pos=lambda *_: self._sync_typing_row(row), size=lambda *_: self._sync_typing_row(row))
+        row.add_widget(BrandMark(dp(25)))
+        row.add_widget(make_label("Готовлю ответ", 10.5, "text_dim", False,
+                                  size_hint=(None, 1), width=dp(100)))
+        dots = TypingDots()
+        row._typing_dots = dots
+        row.add_widget(dots)
+        row.add_widget(Widget(size_hint_x=1))
         self.typing = row
         self.messages_box.add_widget(row)
         self.scroll_to_bottom()
 
+    @staticmethod
+    def _sync_typing_row(row):
+        try:
+            row._typing_bg.pos = row.pos
+            row._typing_bg.size = row.size
+            row._typing_rim.rounded_rectangle = (row.x, row.y, row.width, row.height, dp(18))
+        except Exception:
+            pass
+
     def _remove_typing(self):
         if self.typing is not None:
+            try:
+                self.typing._typing_dots.stop()
+            except Exception:
+                pass
             try:
                 self.messages_box.remove_widget(self.typing)
             except Exception:
@@ -1977,7 +2496,7 @@ class ChatRoot(BoxLayout):
             if self._stream_flush_scheduled:
                 return
             self._stream_flush_scheduled = True
-        interval = 0.075 if STATE.get("performance_mode", True) else 0.035
+        interval = 0.038 if STATE.get("performance_mode", True) else 0.026
         Clock.schedule_once(self._flush_stream_pieces, interval)
 
     def _flush_stream_pieces(self, _dt=0):
@@ -1998,7 +2517,7 @@ class ChatRoot(BoxLayout):
             return
         self._remove_typing()
         if self.stream_bubble is None:
-            self.stream_bubble = self.add_message("ai", "", animate=False)
+            self.stream_bubble = self.add_message("ai", "", animate=True)
         self.stream_bubble.append(piece)
         # No repeated cancel/restart of a ScrollView animation while tokens arrive.
         # If the user has scrolled up to read earlier content, keep their position.
@@ -2010,17 +2529,26 @@ class ChatRoot(BoxLayout):
             self.toast("Дождись завершения ответа или нажми Стоп")
             return
         text = self.input.text.strip()
-        attached_image = self.pending_image
-        if not text and not attached_image:
+        if not text:
             return
-        if not text and attached_image:
-            text = "Опиши это изображение и перечисли, что на нём видно."
         self.input.text = ""
         low = text.lower().strip()
         sid = SESSION_ID
 
+        if is_identity_question(text):
+            try:
+                user_id = db_add("user", text, sid)
+                self.add_message("me", text, msg_id=user_id)
+                answer_id = db_add("assistant", IDENTITY_REPLY, sid)
+                self.add_message("ai", IDENTITY_REPLY, msg_id=answer_id)
+                self._set_chips_visible(False)
+                self.title_lbl.text = "AI Чат"
+            except Exception as exc:
+                self.toast("Не удалось сохранить ответ: " + str(exc)[:70])
+            return
+
         # Local commands are saved to history like regular turns.
-        note_match = None if attached_image else re.match(r"^заметка\s*:?\s*(.+)$", text, re.I | re.S)
+        note_match = re.match(r"^заметка\s*:?\s*(.+)$", text, re.I | re.S)
         if note_match:
             note_text = note_match.group(1).strip()
             if note_text:
@@ -2034,8 +2562,8 @@ class ChatRoot(BoxLayout):
                 self.title_lbl.text = "AI Чат"
             return
 
-        calc_match = None if attached_image else re.match(r"^(?:посчитай|вычисли|калькулятор|сколько будет)\s+(.+)$", text, re.I | re.S)
-        quadratic_match = False if attached_image else re.match(r"^квадратное\s+.+$", low)
+        calc_match = re.match(r"^(?:посчитай|вычисли|калькулятор|сколько будет)\s+(.+)$", text, re.I | re.S)
+        quadratic_match = re.match(r"^квадратное\s+.+$", low)
         if calc_match or quadratic_match:
             expr = calc_match.group(1).strip() if calc_match else text
             result, error = calc_safe(expr)
@@ -2048,9 +2576,14 @@ class ChatRoot(BoxLayout):
             self.title_lbl.text = "AI Чат"
             return
 
-        image_match = None if attached_image else re.match(r"^(?:нарисуй|картинка|сгенерируй(?: изображение)?)\s+(.+)$", text, re.I | re.S)
+        image_match = re.match(r"^(?:нарисуй|картинка|сгенерируй(?: изображение)?)\s+(.+)$", text, re.I | re.S)
         if image_match:
             prompt = image_match.group(1).strip()
+            # Remove common Russian conversational filler so "нарисуй мне котика"
+            # is sent to the image model as "котика", not literally "мне котика".
+            prompt = re.sub(r"^(?:(?:мне|пожалуйста|картинку|изображение)\s+)+", "", prompt, flags=re.I).strip()
+            if not prompt:
+                prompt = "красивую иллюстрацию"
             user_id = db_add("user", text, sid)
             self.add_message("me", text, msg_id=user_id)
             self._set_chips_visible(False)
@@ -2078,17 +2611,15 @@ class ChatRoot(BoxLayout):
                 self.request_kind = None
                 self._set_busy(False)
                 self.title_lbl.text = "AI Чат"
-            generate_image(prompt, done, image_cancel, IMAGE_API_KEY)
+            generate_image(prompt, done, image_cancel)
             return
 
         try:
-            user_id = db_add("user", text, sid, image_path=attached_image)
+            user_id = db_add("user", text, sid)
         except Exception as exc:
             self.add_message("ai", "Ошибка сохранения истории: " + str(exc)[:120])
             return
-        self.add_message("me", text, msg_id=user_id, image_path=attached_image)
-        if attached_image:
-            self._clear_pending_image()
+        self.add_message("me", text, msg_id=user_id)
         self._set_chips_visible(False)
         self.title_lbl.text = "AI Чат"
         self.request_id = uuid.uuid4().hex
@@ -2098,9 +2629,9 @@ class ChatRoot(BoxLayout):
         self.stream_bubble = None
         self._set_busy(True, "думаю…")
         self._show_typing()
-        threading.Thread(target=self._ai_worker, args=(rid, sid, self.cancel_event, attached_image), daemon=True).start()
+        threading.Thread(target=self._ai_worker, args=(rid, sid, self.cancel_event), daemon=True).start()
 
-    def _ai_worker(self, rid, sid, cancel_event, image_path=""):
+    def _ai_worker(self, rid, sid, cancel_event):
         reply = None
         error = None
         chunks_seen = []
@@ -2114,39 +2645,11 @@ class ChatRoot(BoxLayout):
                 role = row["role"]
                 if role in ("user", "assistant", "system"):
                     messages.append({"role": role, "content": row["content"]})
-            if image_path:
-                try:
-                    messages = self._make_multimodal_messages(messages, image_path)
-                except Exception as image_exc:
-                    raise ValueError("Не удалось подготовить фото для ИИ: " + str(image_exc))
             def on_chunk(piece):
                 chunks_seen.append(piece)
                 self._queue_stream_piece(rid, piece)
-            reply = None
-            error = None
-            if image_path:
-                if not IMAGE_API_KEY:
-                    error = ("Для распознавания фотографии нужен ключ Pollinations API. "
-                             "Открой Настройки → Изображения, нажми «Открыть страницу ключа», "
-                             "получи личный ключ и сохрани его. Обычные текстовые API не умеют "
-                             "обрабатывать прикреплённое изображение.")
-                elif not cancel_event.is_set():
-                    # Current documented vision endpoint/model; don't try providers
-                    # that already reject image_url and then dump huge JSON errors.
-                    vision_provider = {
-                        "name": "Pollinations Vision",
-                        "url": "https://gen.pollinations.ai/v1/chat/completions",
-                        "model": "openai/gpt-5.4-nano",
-                        "key": IMAGE_API_KEY,
-                        "stream": False,
-                    }
-                    reply, error = try_provider(vision_provider, messages,
-                                                cancel_event=cancel_event)
-                    if not reply:
-                        error = friendly_api_error(error)
-            elif not cancel_event.is_set():
-                reply, error = ask_ai(messages, on_chunk=on_chunk,
-                                      cancel_event=cancel_event)
+            if not cancel_event.is_set():
+                reply, error = ask_ai(messages, on_chunk=on_chunk, cancel_event=cancel_event)
         except Exception as exc:
             error = f"{type(exc).__name__}: {str(exc)[:140]}"
         interrupted = cancel_event.is_set()
@@ -2245,16 +2748,22 @@ class ChatRoot(BoxLayout):
         self.status_lbl.color = T("danger")
 
     def use_chip(self, text):
-        if text.startswith("Посчитай"):
-            self.input.text = text
-        elif text == "Помоги с кодом":
-            self.input.text = "Помоги написать и проверить код на Python: "
-        elif text == "Интересный факт":
-            self.input.text = "Расскажи интересный научный факт и объясни его простыми словами."
-        elif text == "Нарисуй кота":
-            self.input.text = "Нарисуй кота"
-        else:
-            self.input.text = text
+        prompts = {
+            "Объясни просто": "Объясни простыми словами: ",
+            "Помоги с кодом": "Помоги написать и проверить код на Python: ",
+            "Краткое резюме": "Сделай краткое резюме: ",
+            "Сократи текст": "Сократи текст, сохранив главные мысли: ",
+            "Интересный факт": "Расскажи интересный научный факт и объясни его простыми словами.",
+            "Нарисуй кота": "Нарисуй кота",
+            "Переведи на английский": "Переведи на английский: ",
+            "Перевод": "Переведи текст на нужный язык: ",
+            "Создай текст": "Помоги написать хороший текст. Уточни цель, стиль и аудиторию: ",
+        }
+        self.input.text = text if text.startswith("Посчитай") else prompts.get(text, text)
+        # For prompts needing user text, focus the input rather than sending an empty template.
+        if self.input.text.endswith(": "):
+            self.input.focus = True
+            return
         self.send()
 
     def voice_click(self):
@@ -2285,6 +2794,21 @@ class ChatRoot(BoxLayout):
         top.add_widget(make_label("Просмотр изображения", 15, bold=True))
         top.add_widget(popup_button("×", popup.dismiss, "default", dp(36)))
         outer.add_widget(top)
+        try:
+            image_bytes = os.path.getsize(path)
+            dimensions = ""
+            try:
+                from PIL import Image
+                with Image.open(path) as image_file:
+                    dimensions = f"{image_file.width} × {image_file.height} · "
+            except Exception:
+                pass
+            image_size_label = dimensions + (f"{image_bytes / (1024 * 1024):.2f} МБ"
+                               if image_bytes >= 1024 * 1024 else f"{max(1, image_bytes // 1024)} КБ")
+        except OSError:
+            image_size_label = os.path.basename(path)
+        outer.add_widget(make_label(image_size_label, 10, "text_dim",
+                                    size_hint=(1, None), height=dp(20)))
         preview = KivyImage(source=path, allow_stretch=True, keep_ratio=True, size_hint=(1, 1))
         outer.add_widget(preview)
         outer.add_widget(popup_button("Сохранить в галерею", lambda: self.save_image_to_gallery(path), "accent", dp(46)))
@@ -2307,7 +2831,7 @@ class ChatRoot(BoxLayout):
                 self.toast("Сохранено: " + target)
                 try:
                     from jnius import autoclass
-                    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                    PythonActivity = autoclass("org.renpy.android.PythonActivity")
                     Intent = autoclass("android.content.Intent")
                     Uri = autoclass("android.net.Uri")
                     activity = PythonActivity.mActivity
@@ -2319,7 +2843,7 @@ class ChatRoot(BoxLayout):
                 return
             except Exception:
                 continue
-        self.toast("Не удалось сохранить в галерею. Фото осталось в папке images")
+        self.toast("Не удалось сохранить в галерею. Изображение осталось в папке images")
 
     # Message actions / favorites / regeneration
     def open_message_actions(self, bubble):
@@ -2343,14 +2867,36 @@ class ChatRoot(BoxLayout):
         popup.open()
 
     def open_quick_actions(self, bubble):
-        popup = RoundedPopup(size_hint=(0.84, 0.48))
-        popup.container.add_widget(make_label("Быстрые действия", 17, bold=True,
-                                              size_hint=(1, None), height=dp(34)))
-        popup.container.add_widget(popup_button("Копировать", lambda: (self.copy_text(bubble.text), popup.dismiss())))
-        popup.container.add_widget(popup_button("В избранное", lambda: self._toggle_star(bubble, popup), "accent"))
-        popup.container.add_widget(popup_button("В заметки", lambda: (db_note_add(bubble.text), popup.dismiss(), self.toast("Сохранено в заметки"))))
-        popup.container.add_widget(popup_button("Закрыть", popup.dismiss))
+        popup = RoundedPopup(size_hint=(0.90, 0.84))
+        popup.container.add_widget(make_label("ДЕЙСТВИЯ С ОТВЕТОМ", 11, "accent", True,
+                                              size_hint=(1, None), height=dp(20)))
+        popup.container.add_widget(make_label(bubble.text[:180].replace("\n", " "), 11, "text_dim",
+                                              size_hint=(1, None), height=dp(44), valign="top"))
+        popup.container.add_widget(popup_button("Копировать текст", lambda: (self.copy_text(bubble.text), popup.dismiss()), "default", dp(42)))
+        popup.container.add_widget(popup_button("Продолжить ответ", lambda: self._follow_up_from_bubble(bubble, "Продолжи этот ответ с того места, где остановился. Не повторяй уже сказанное.", popup), "accent", dp(42)))
+        popup.container.add_widget(popup_button("Объяснить проще", lambda: self._follow_up_from_bubble(bubble, "Объясни этот ответ проще, понятным языком, сохранив важные детали.", popup), "default", dp(42)))
+        popup.container.add_widget(popup_button("Сделать короче", lambda: self._follow_up_from_bubble(bubble, "Сократи этот ответ до самого важного, без потери смысла.", popup), "default", dp(42)))
+        popup.container.add_widget(popup_button("Добавить подробности", lambda: self._follow_up_from_bubble(bubble, "Раскрой этот ответ подробнее, добавь шаги и практические примеры.", popup), "default", dp(42)))
+        popup.container.add_widget(popup_button("Сохранить в заметки", lambda: (db_note_add(bubble.text), popup.dismiss(), self.toast("Сохранено в заметки")), "default", dp(42)))
+        label = "Убрать из избранного" if bubble.starred else "Добавить в избранное"
+        popup.container.add_widget(popup_button(label, lambda: self._toggle_star(bubble, popup), "accent", dp(42)))
+        popup.container.add_widget(popup_button("Закрыть", popup.dismiss, "default", dp(42)))
         popup.open()
+
+    def _follow_up_from_bubble(self, bubble, instruction, popup=None):
+        """Build a context-explicit follow-up prompt, so actions work on older messages too."""
+        if self.busy:
+            self.toast("Сначала дождись завершения текущего ответа")
+            if popup:
+                popup.dismiss()
+            return
+        if popup:
+            popup.dismiss()
+        quoted = (bubble.text or "").strip()[:5000]
+        prompt = instruction + "\n\nТекст ответа для работы:\n" + quoted
+        self.input.text = prompt
+        self.input.focus = False
+        self.send()
 
     def _toggle_star(self, bubble, popup=None):
         if bubble.msg_id:
@@ -2465,6 +3011,57 @@ class ChatRoot(BoxLayout):
         popup.open()
 
     # Main menu / sessions / search / settings
+    def open_prompt_studio(self, *_):
+        """A local prompt composer: add intent/style instructions without another API call."""
+        popup = RoundedPopup(size_hint=(0.94, 0.82))
+        popup.container.add_widget(make_label("МАСТЕР ЗАПРОСА", 17, "text", True,
+                                              size_hint=(1, None), height=dp(34)))
+        popup.container.add_widget(make_label("Сформулируй задачу точнее. Подсказки добавляются в поле автоматически.",
+                                              10, "text_dim", False, size_hint=(1, None), height=dp(36), valign="top"))
+        editor = TextInput(text=self.input.text, hint_text="Напиши, чего хочешь добиться…", multiline=True,
+                           size_hint=(1, 1), font_size=sp(13), foreground_color=T("text"),
+                           hint_text_color=T("text_dim"), cursor_color=T("accent"),
+                           background_normal="", background_active="", background_color=T("panel2"),
+                           padding=(dp(10), dp(10)))
+        popup.container.add_widget(editor)
+        tool_rows = [
+            ("Пошагово", "Объясни по шагам, от простого к сложному."),
+            ("С примерами", "Добавь конкретные примеры и покажи результат."),
+            ("Кратко", "Сначала дай короткий вывод, затем только самое важное."),
+            ("Проверь", "Проверь логику и факты; не скрывай неопределённость."),
+            ("Для новичка", "Объясни для новичка, избегай лишнего жаргона."),
+        ]
+        row = GridLayout(cols=2, size_hint=(1, None), height=dp(124), spacing=dp(5))
+        for caption, instruction in tool_rows:
+            button = popup_button(caption, lambda value=instruction: self._append_prompt_instruction(editor, value), "default", dp(38))
+            row.add_widget(button)
+        popup.container.add_widget(row)
+        actions = BoxLayout(size_hint=(1, None), height=dp(46), spacing=dp(7))
+        actions.add_widget(popup_button("Вставить", lambda: self._apply_prompt_studio(editor, popup, False), "default"))
+        actions.add_widget(popup_button("Отправить", lambda: self._apply_prompt_studio(editor, popup, True), "accent"))
+        popup.container.add_widget(actions)
+        popup.open()
+
+    @staticmethod
+    def _append_prompt_instruction(editor, instruction):
+        current = editor.text.strip()
+        if instruction.lower() not in current.lower():
+            editor.text = (current + "\n\n" + instruction).strip() if current else instruction + "\n\nМоя задача: "
+        editor.focus = True
+
+    def _apply_prompt_studio(self, editor, popup, submit):
+        value = editor.text.strip()
+        if not value:
+            self.toast("Сначала напиши запрос")
+            return
+        self.input.text = value
+        popup.dismiss()
+        if submit:
+            self.send()
+        else:
+            self.input.focus = True
+            self.toast("Запрос добавлен в поле ввода")
+
     def open_menu(self):
         if self.busy:
             self.toast("Заверши генерацию или нажми Стоп перед открытием меню")
@@ -2476,6 +3073,8 @@ class ChatRoot(BoxLayout):
             ("Новый чат", self.new_chat, "default"),
             ("Мои чаты", self.open_sessions, "default"),
             ("Поиск по истории", self.open_search, "default"),
+            ("Мастер запроса", self.open_prompt_studio, "accent"),
+            ("Смайлики и символы", self.open_emoji_picker, "default"),
             ("Заметки", self.open_notes, "default"),
             ("Избранное", self.open_starred, "default"),
             ("Копировать текущий чат", self.copy_current_chat, "default"),
@@ -2511,11 +3110,8 @@ class ChatRoot(BoxLayout):
         head = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(76), spacing=dp(2))
         head.add_widget(make_label("Настройки", 22, bold=True,
                                    size_hint=(1, 0.62)))
-        key_status = "Ключ сохранён на устройстве" if IMAGE_API_KEY else "Добавь API-ключ для генерации и анализа фото"
-        key_status_lbl = make_label(key_status, 10, "online" if IMAGE_API_KEY else "text_dim",
-                                    size_hint=(1, 0.38))
-        self._settings_key_status_lbl = key_status_lbl
-        head.add_widget(key_status_lbl)
+        head.add_widget(make_label("Персонализация · производительность · генерация", 10, "text_dim",
+                                    size_hint=(1, 0.38)))
         popup.container.add_widget(head)
 
         scroll = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"])
@@ -2562,7 +3158,7 @@ class ChatRoot(BoxLayout):
                         self.toast("Внешний вид сохранён")
                     elif key == "provider_preference":
                         self.toast("Предпочтительный API сохранён")
-                    elif key in ("image_size", "image_model"):
+                    elif key == "image_size":
                         self.toast("Параметры изображения сохранены")
                 button.bind(on_release=choose)
                 row.add_widget(button)
@@ -2586,6 +3182,8 @@ class ChatRoot(BoxLayout):
                 save_settings(); repaint()
                 if key == "show_suggestions":
                     self._refresh_bottom_layout()
+                elif key == "sparkle_background":
+                    self._set_sparkles_enabled(bool(STATE.get(key, True)))
                 elif key == "show_model_status":
                     self._update_status()
                 elif key in ("show_time", "show_avatars", "msg_spacing", "font_size", "font_weight", "font_family", "theme"):
@@ -2598,7 +3196,7 @@ class ChatRoot(BoxLayout):
 
         # Appearance
         card = section("ВНЕШНИЙ ВИД", "Персонализируй цвета, текст и плотность интерфейса")
-        selector(card, "Цветовая тема", "theme", [("night", "Ночь"), ("midnight", "Полночь"), ("daylight", "День")])
+        selector(card, "Цветовая тема", "theme", [("aurora", "Aurora"), ("night", "Ночь"), ("midnight", "Полночь"), ("daylight", "День")])
         selector(card, "Размер текста", "font_size", [("small", "S"), ("medium", "M"), ("large", "L"), ("xlarge", "XL")])
         selector(card, "Начертание по умолчанию", "font_weight", [("normal", "Обычный"), ("bold", "Жирный")])
         selector(card, "Гарнитура сообщений", "font_family", [("roboto", "Roboto"), ("serif", "Serif"), ("mono", "Mono"), ("noto", "Noto")])
@@ -2614,12 +3212,15 @@ class ChatRoot(BoxLayout):
         toggle(card, "Автопрокрутка", "auto_scroll", "Прокручивать чат к новым ответам")
         toggle(card, "Анимации сообщений", "message_animations", "Плавное появление новых сообщений")
         toggle(card, "Режим без лагов", "performance_mode", "Объединяет фрагменты ответа и уменьшает лишние перерисовки")
+        toggle(card, "Падающие искорки", "sparkle_background", "Лёгкая анимация на фоне чата; отключи для экономии батареи")
         if ANDROID:
             toggle(card, "Озвучивать ответы", "voice_out", "Автоматически читать ответы ИИ вслух")
 
         # AI tuning
         card = section("ИНТЕЛЛЕКТ И ОТВЕТЫ", "Выбери предпочтительный маршрут; резервные сервисы могут помочь при сбоях")
-        provider_choices = [("auto", "Авто"), ("KeylessAI", "Keyless"), ("Kilo", "Kilo"), ("LLM7", "LLM7"), ("Pollinations", "Pollin.")]
+        provider_choices = [("auto", "Авто"), ("KeylessAI", "Keyless"), ("Kilo", "Kilo"), ("LLM7", "LLM7")]
+        if IMAGE_API_KEY:
+            provider_choices.append(("Pollinations", "Pollin."))
         selector(card, "Предпочтительный провайдер", "provider_preference", provider_choices)
         toggle(card, "Автоматический резерв", "fallback_enabled", "Переходить к другому сервису при ошибке")
         toggle(card, "Потоковая выдача", "streaming", "Показывать ответ по мере генерации, если API поддерживает")
@@ -2644,29 +3245,11 @@ class ChatRoot(BoxLayout):
         card.add_widget(popup_button("Сохранить инструкции", save_prompt, "accent"))
         card.add_widget(popup_button("Вернуть стандартные инструкции", lambda: (setattr(prompt_input, "text", ""), STATE.update({"custom_prompt": ""}), save_settings(), self.toast("Возвращены стандартные инструкции"))))
 
-        # Image tools
-        card = section("ИЗОБРАЖЕНИЯ И ФОТО", "Генерация и распознавание фотографий используют Pollinations API key")
-        card.add_widget(make_label("Ключ хранится локально в chat.db без шифрования. Не делись базой данных с другими людьми.", 10, "text_dim", size_hint=(1, None), height=dp(36)))
-        key_input = TextInput(text=IMAGE_API_KEY, hint_text="Вставь личный API-ключ", password=True,
-                              multiline=False, size_hint=(1, None), height=dp(44), font_size=sp(12),
-                              foreground_color=T("text"), hint_text_color=T("text_dim"), cursor_color=T("accent"),
-                              background_normal="", background_active="", background_color=T("panel3"),
-                              padding=(dp(10), dp(10)))
-        card.add_widget(key_input)
-        key_actions = BoxLayout(size_hint=(1, None), height=dp(42), spacing=dp(6))
-        save_key_btn = popup_button("Сохранить ключ", lambda: self._save_key_setting(key_input.text), "accent", dp(42))
-        def clear_key():
-            key_input.text = ""
-            self._save_key_setting("")
-        clear_key_btn = popup_button("Удалить", clear_key, "danger", dp(42))
-        key_actions.add_widget(save_key_btn); key_actions.add_widget(clear_key_btn); card.add_widget(key_actions)
-        card.add_widget(popup_button("Открыть страницу API-ключа", lambda: self.open_external("https://enter.pollinations.ai/keys")))
-        selector(card, "Размер изображения", "image_size", [("512", "512 px"), ("768", "768 px"), ("1024", "1024 px")])
-        selector(card, "Модель изображения", "image_model", [("flux", "Flux"), ("zimage", "Z-Image")])
-        self._settings_image_key_status_lbl = make_label(
-            "Статус: ключ сохранён" if IMAGE_API_KEY else "Статус: ключ не добавлен",
-            10, "success" if IMAGE_API_KEY else "danger", size_hint=(1, None), height=dp(20))
-        card.add_widget(self._settings_image_key_status_lbl)
+        # Image generation only; photo-input controls have been removed.
+        card = section("ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЙ", "Создавай картинки из сообщения. Личный API-ключ не требуется; анонимная очередь может ждать дольше.")
+        card.add_widget(make_label("Напиши «Нарисуй …». Готовая картинка появится в переписке и сохранится в папке images.", 11, "text_dim", size_hint=(1, None), height=dp(40)))
+        selector(card, "Размер изображения", "image_size", [("512", "512 px · быстрее"), ("768", "768 px · детальнее")])
+        card.add_widget(popup_button("Проверить AI Horde", lambda: self.run_diagnostics(popup), "default"))
 
         # Storage / safety
         card = section("ДАННЫЕ И ПРИВАТНОСТЬ", "История хранится локально; резервная копия помогает перенести данные")
@@ -2684,6 +3267,7 @@ class ChatRoot(BoxLayout):
         popup.container.add_widget(popup_button("Готово", lambda: self._close_settings(popup), "accent", dp(48)))
         popup.open()
 
+
     def _close_settings(self, popup):
         try:
             popup.dismiss()
@@ -2694,18 +3278,6 @@ class ChatRoot(BoxLayout):
         app = App.get_running_app()
         if app:
             app.rebuild_ui()
-
-    def _save_key_setting(self, value):
-        save_image_api_key(value)
-        saved = bool(IMAGE_API_KEY)
-        if getattr(self, "_settings_key_status_lbl", None):
-            self._settings_key_status_lbl.text = ("Ключ сохранён на устройстве" if saved
-                                                  else "Добавь API-ключ для генерации и анализа фото")
-            self._settings_key_status_lbl.color = T("online" if saved else "text_dim")
-        if getattr(self, "_settings_image_key_status_lbl", None):
-            self._settings_image_key_status_lbl.text = "Статус: ключ сохранён" if saved else "Статус: ключ не добавлен"
-            self._settings_image_key_status_lbl.color = T("success" if saved else "danger")
-        self.toast("Ключ удалён" if not saved else "Ключ сохранён на устройстве")
 
     def open_external(self, url):
         try:
@@ -2726,7 +3298,7 @@ class ChatRoot(BoxLayout):
                     if os.path.isfile(full): total += os.path.getsize(full)
                 except Exception:
                     pass
-            return f"Чатов: {sessions} · сообщений: {messages} · заметок: {notes}\nПапка фото: {total / (1024 * 1024):.1f} МБ"
+            return f"Чатов: {sessions} · сообщений: {messages} · заметок: {notes}\nИзображения ИИ: {total / (1024 * 1024):.1f} МБ"
         except Exception:
             return "Не удалось получить статистику хранилища."
 
@@ -2738,8 +3310,8 @@ class ChatRoot(BoxLayout):
                 notes = [dict(row) for row in DB.execute("SELECT * FROM notes ORDER BY id DESC")]
                 # Do not include API credentials in backups.
                 meta = {row["k"]: row["v"] for row in DB.execute("SELECT k,v FROM meta")
-                        if row["k"] not in ("pollinations_api_key",)}
-            payload = {"app": "AI Chat Premium", "version": "v" + APP_VERSION, "exported_at": DT.now().isoformat(timespec="seconds"),
+                        if row["k"] != "pollinations_api_key" }
+            payload = {"app": "AI Chat Aurora", "version": "v" + APP_VERSION, "exported_at": DT.now().isoformat(timespec="seconds"),
                        "sessions": sessions, "messages": messages, "notes": notes, "settings": meta}
             path = os.path.join(ROOT, "ai_chat_backup_" + DT.now().strftime("%Y%m%d_%H%M%S") + ".json")
             with open(path, "w", encoding="utf-8") as stream:
@@ -2754,8 +3326,6 @@ class ChatRoot(BoxLayout):
         try:
             with DB_LOCK:
                 referenced = {os.path.abspath(row[0]) for row in DB.execute("SELECT image_path FROM messages WHERE image_path != ''")}
-            if getattr(self, "pending_image", "") and os.path.isfile(self.pending_image):
-                referenced.add(os.path.abspath(self.pending_image))
             removed = 0
             for name in os.listdir(IMG_DIR):
                 path = os.path.abspath(os.path.join(IMG_DIR, name))
@@ -2781,7 +3351,7 @@ class ChatRoot(BoxLayout):
         app = App.get_running_app()
         if app:
             app.rebuild_ui()
-        self.toast("Настройки сброшены. Ключ API сохранён отдельно.")
+        self.toast("Настройки интерфейса сброшены.")
 
     def run_diagnostics(self, parent_popup=None):
         if parent_popup:
@@ -2791,7 +3361,7 @@ class ChatRoot(BoxLayout):
             results = []
             for label, url in (
                 ("Kilo", "https://api.kilo.ai/api/gateway/models"),
-                ("Pollinations", "https://gen.pollinations.ai/v1/models"),
+                ("AI Horde", "https://aihorde.net/api/v2/status/status"),
             ):
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
@@ -2801,10 +3371,7 @@ class ChatRoot(BoxLayout):
                     results.append(f"{label}: ответ HTTP {exc.code}")
                 except Exception as exc:
                     results.append(f"{label}: нет соединения ({friendly_api_error(str(exc))})")
-            if not IMAGE_API_KEY:
-                results.append("Функции изображений: нужен личный API-ключ")
-            else:
-                results.append("Ключ сохранён; авторизация не проверялась, чтобы не расходовать лимит")
+            results.append("Генерация изображений: AI Horde, анонимный режим; очередь зависит от доступных исполнителей")
             report = "\n".join(results)
             Clock.schedule_once(lambda *_: self.show_diagnostic_report(report), 0)
         threading.Thread(target=worker, daemon=True).start()
@@ -2896,7 +3463,8 @@ class ChatRoot(BoxLayout):
         SESSION_ID = new_session()
         self.load_chat()
         self._build_chips()
-        self._set_chips_visible(True)
+        self._set_chips_visible(False)
+
     def confirm_clear(self):
         confirm = Popup(title="Очистить чат?", title_color=T("text"), separator_color=T("danger"),
                         background_color=T("panel"), size_hint=(0.82, 0.33))
@@ -2910,7 +3478,7 @@ class ChatRoot(BoxLayout):
             confirm.dismiss()
             self.load_chat()
             self._build_chips()
-            self._set_chips_visible(True)
+            self._set_chips_visible(False)
         yes.bind(on_release=clear)
         no.bind(on_release=lambda *_: confirm.dismiss())
         row.add_widget(yes); row.add_widget(no); box.add_widget(row)
@@ -2984,13 +3552,14 @@ class ChatRoot(BoxLayout):
 
 class ChatApp(App):
     def build(self):
-        self.title = "AI Чат Premium"
+        self.title = "AI Chat Aurora"
         Window.clearcolor = T("bg_top")
         self.root_widget = ChatRoot()
         return self.root_widget
 
     def on_start(self):
-        """Check GitHub Releases in a background thread; never block the UI."""
+        """Enable tablet rotation where appropriate and check Releases off the UI thread."""
+        self._enable_tablet_rotation()
         threading.Thread(
             target=self._check_for_updates_worker,
             daemon=True,
@@ -2998,11 +3567,26 @@ class ChatApp(App):
         ).start()
 
     @staticmethod
+    def _enable_tablet_rotation():
+        """Allow sensor rotation on Android tablets (smallest width >= 600 dp)."""
+        try:
+            from jnius import autoclass
+            activity_class = autoclass("org.renpy.android.PythonActivity")
+            activity = activity_class.mActivity
+            configuration = activity.getResources().getConfiguration()
+            smallest_width = int(getattr(configuration, "smallestScreenWidthDp", 0))
+            if smallest_width >= 600:
+                activity_info = autoclass("android.content.pm.ActivityInfo")
+                activity.setRequestedOrientation(activity_info.SCREEN_ORIENTATION_SENSOR)
+        except Exception as exc:
+            print("[Orientation] Tablet sensor rotation unavailable:", repr(exc))
+
+    @staticmethod
     def _version_tuple(value):
         parts = re.findall(r"\d+", str(value))
         return tuple(int(part) for part in parts) if parts else (0,)
 
-    def _check_for_updates_worker(self):
+    def _check_for_updates_worker(self, manual=False):
         try:
             request = urllib.request.Request(
                 UPDATE_API_URL,
@@ -3027,6 +3611,9 @@ class ChatApp(App):
             installed_tuple = self._version_tuple(APP_VERSION)
             print(f"[Updater] installed={APP_VERSION}; latest={latest_version}")
             if latest_tuple <= installed_tuple:
+                if manual:
+                    Clock.schedule_once(lambda _dt: self.root_widget.toast(
+                        "Установлена последняя версия " + latest_version), 0)
                 return
 
             release_url = str(
@@ -3062,72 +3649,103 @@ class ChatApp(App):
             )
 
     def _show_update_dialog(self, version, download_url, release_url, release_notes=""):
+        """A compact, scroll-safe update card that fits portrait phones and landscape tablets."""
         try:
-            content = BoxLayout(
-                orientation="vertical",
-                padding=dp(16),
-                spacing=dp(10),
-            )
-            message = (
-                f"Доступно обновление AI Chat: {version}\n"
-                f"Установлена версия: v{APP_VERSION}"
-            )
-            if release_notes:
-                message += "\n\n" + release_notes
-            label = Label(
-                text=message,
-                color=T("text"),
-                font_size=sp(13),
-                halign="left",
-                valign="middle",
-            )
-            label.bind(size=lambda widget, *_: setattr(
-                widget, "text_size", (widget.width, None)
-            ))
-            content.add_widget(label)
+            max_height = max(dp(300), Window.height - dp(28))
+            popup_height = min(dp(520), max_height)
+            popup = RoundedPopup(size_hint=(0.93, None), height=popup_height)
+            popup.container.padding = (dp(16), dp(14))
+            popup.container.spacing = dp(9)
 
-            actions = BoxLayout(
-                size_hint_y=None,
-                height=dp(46),
-                spacing=dp(8),
-            )
-            popup = Popup(
-                title="Доступно обновление",
-                content=content,
-                size_hint=(0.92, None),
-                height=dp(310 if release_notes else 220),
-                auto_dismiss=True,
-            )
-            later = Button(text="Позже", size_hint_x=0.40)
-            update = Button(text="Скачать", size_hint_x=0.60)
+            hero = BoxLayout(orientation="horizontal", size_hint=(1, None),
+                             height=dp(62), spacing=dp(11))
+            hero.add_widget(Avatar("↑", T("accent"), size_px=dp(48)))
+            hero_text = BoxLayout(orientation="vertical", spacing=dp(1))
+            hero_text.add_widget(make_label("Доступно обновление", 18, bold=True,
+                                            size_hint=(1, 0.62)))
+            hero_text.add_widget(make_label("AI CHAT · НОВАЯ ВЕРСИЯ", 9, "accent", True,
+                                            size_hint=(1, 0.38)))
+            hero.add_widget(hero_text)
+            popup.container.add_widget(hero)
+
+            version_card = BoxLayout(orientation="vertical", size_hint=(1, None),
+                                      height=dp(65), padding=(dp(12), dp(8)), spacing=dp(2))
+            with version_card.canvas.before:
+                Color(*T("panel2"))
+                card_rect = RoundedRectangle(pos=version_card.pos, size=version_card.size,
+                                             radius=[dp(15)])
+            version_card.bind(pos=lambda *_args: setattr(card_rect, "pos", version_card.pos),
+                              size=lambda *_args: setattr(card_rect, "size", version_card.size))
+            version_text = str(version).strip()
+            if version_text and not version_text.lower().startswith("v"):
+                version_text = "v" + version_text
+            version_card.add_widget(make_label("Новая версия  " + (version_text or "доступна"),
+                                               15, "success", True, size_hint=(1, 0.56)))
+            version_card.add_widget(make_label("Установлена версия: v" + APP_VERSION,
+                                               10, "text_dim", size_hint=(1, 0.44)))
+            popup.container.add_widget(version_card)
+
+            notes = str(release_notes or "").strip()
+            notes = re.sub(r"(?m)^#{1,6}\s*", "", notes)
+            notes = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\1", notes)
+            notes = notes[:1800]
+            if notes:
+                popup.container.add_widget(make_label("ЧТО НОВОГО", 10, "text_dim", True,
+                                                      size_hint=(1, None), height=dp(19)))
+                notes_scroll = ScrollView(do_scroll_x=False, bar_width=dp(2),
+                                          scroll_type=["bars", "content"])
+                notes_label = Label(text=notes, color=T("text"), font_size=sp(11),
+                                    halign="left", valign="top", size_hint=(1, None),
+                                    markup=False)
+                def fit_notes(widget, *_args):
+                    widget.text_size = (max(dp(80), widget.width - dp(8)), None)
+                    widget.height = max(dp(28), widget.texture_size[1] + dp(8))
+                notes_label.bind(texture_size=fit_notes, width=fit_notes)
+                notes_scroll.add_widget(notes_label)
+                notes_scroll.height = dp(112 if Window.width > Window.height else 132)
+                popup.container.add_widget(notes_scroll)
+            else:
+                popup.container.add_widget(make_label(
+                    "Улучшения и исправления уже готовы. Обнови приложение, чтобы получить их.",
+                    12, "text_dim", size_hint=(1, 1), valign="top"))
+
+            footer = BoxLayout(orientation="horizontal", size_hint=(1, None),
+                               height=dp(46), spacing=dp(8))
+            later = popup_button("Позже", popup.dismiss, "default", dp(46))
 
             def open_download(*_args):
                 popup.dismiss()
+                url = download_url or release_url
                 try:
-                    opened = webbrowser.open(download_url or release_url)
-                    if not opened:
+                    opened = webbrowser.open(url)
+                    if not opened and release_url and release_url != url:
                         webbrowser.open(release_url)
-                except Exception:
+                except Exception as exc:
+                    print("[Updater] Cannot open download URL:", repr(exc))
                     try:
-                        webbrowser.open(release_url)
+                        webbrowser.open(release_url or "https://github.com/awayRu/Aish/releases")
                     except Exception:
                         pass
+                    Clock.schedule_once(lambda _dt: self.root_widget.toast(
+                        "Не удалось открыть загрузку. Открой релиз в браузере."), 0)
 
-            later.bind(on_release=popup.dismiss)
-            update.bind(on_release=open_download)
-            actions.add_widget(later)
-            actions.add_widget(update)
-            content.add_widget(actions)
+            download = popup_button("Скачать APK", open_download, "accent", dp(46))
+            footer.add_widget(later)
+            footer.add_widget(download)
+            popup.container.add_widget(footer)
             popup.open()
         except Exception as exc:
             print("[Updater] Cannot show update dialog:", repr(exc))
+            try:
+                self.root_widget.toast("Есть обновление " + str(version) + ". Открой релизы GitHub.")
+            except Exception:
+                pass
 
     def rebuild_ui(self):
         old = self.root_widget
         if getattr(old, "busy", False):
             old.toast("Настройки нельзя менять во время генерации")
             return
-        pending_image = getattr(old, "pending_image", "")
         try:
             old.dispose()
         except Exception:
@@ -3135,8 +3753,6 @@ class ChatApp(App):
         self.root.clear_widgets()
         self.root_widget = ChatRoot()
         self.root.add_widget(self.root_widget)
-        if pending_image and os.path.isfile(pending_image):
-            Clock.schedule_once(lambda *_: self.root_widget._set_pending_image(pending_image, notify=False), 0.15)
         Window.clearcolor = T("bg_top")
 
     def on_pause(self):
@@ -3149,6 +3765,16 @@ class ChatApp(App):
 if __name__ == "__main__":
     try:
         ChatApp().run()
-    except Exception:
+    except BaseException:
+        # Persist startup failures because Pydroid may close/hide the console.
         import traceback
-        traceback.print_exc()
+        report = traceback.format_exc()
+        print(report)
+        try:
+            log_path = os.path.join(ROOT, "ai_chat_startup_error.log")
+            with open(log_path, "a", encoding="utf-8") as log_file:
+                log_file.write("\n" + "=" * 72 + "\n")
+                log_file.write(DT.now().strftime("%Y-%m-%d %H:%M:%S") + "\n")
+                log_file.write(report + "\n")
+        except Exception:
+            pass
