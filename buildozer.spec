@@ -1,15 +1,16 @@
 [app]
-title = AI Chat
+title = AI Chat GameVerse Nexus Smooth
 package.name = aichat
 package.domain = org.aichat
 
 source.dir = .
 source.include_exts = py,png,jpg,jpeg,webp,gif,kv,atlas
 
-version = 1.2
-android.numeric_version = 30
+# Public app release version and Android in-place update code.
+version = 1.42
+android.numeric_version = 42
 
-requirements = python3,kivy==2.1.0,pyjnius,certifi,pillow
+requirements = python3,kivy==2.1.0,pyjnius,certifi,pillow,pypdf
 
 orientation = portrait
 fullscreen = 0
