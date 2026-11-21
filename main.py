@@ -37,7 +37,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "43"
+APP_VERSION = "44"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -107,20 +107,20 @@ THEMES = {
         "ring_bg": (0.012, 0.016, 0.031, 1),
     },
     "aurora": {
-        # Aurora Prism v39: ink-black glass, electric ice, controlled violet and mint.
-        "bg_top": (0.004, 0.008, 0.020, 1), "bg_bot": (0.018, 0.010, 0.040, 1),
-        "panel": (0.020, 0.028, 0.052, 1), "panel2": (0.035, 0.049, 0.083, 1),
-        "panel3": (0.060, 0.078, 0.126, 1), "bubble_me": (0.115, 0.190, 0.465, 1),
-        "bubble_ai": (0.026, 0.038, 0.068, 1), "text": (0.975, 0.985, 1.000, 1),
-        "text_dim": (0.700, 0.755, 0.850, 1), "text_faint": (0.440, 0.505, 0.640, 1),
-        "accent": (0.270, 0.790, 1.000, 1), "accent_soft": (0.040, 0.130, 0.215, 1),
-        "danger": (1.000, 0.365, 0.535, 1), "danger_bg": (0.205, 0.052, 0.115, 1),
-        "success": (0.255, 0.940, 0.735, 1), "success_bg": (0.030, 0.145, 0.115, 1),
-        "star": (1.000, 0.790, 0.330, 1), "star_bg": (0.220, 0.145, 0.040, 1),
-        "avatar_me": (0.390, 0.315, 0.985, 1), "avatar_ai": (0.035, 0.790, 0.900, 1),
-        "online": (0.255, 0.940, 0.735, 1), "chip": (0.027, 0.043, 0.077, 1),
-        "chip_text": (0.875, 0.910, 0.980, 1), "shadow": (0.000, 0.002, 0.018, 0.46),
-        "ring_bg": (0.004, 0.008, 0.020, 1),
+        "bg_top": (0.06, 0.08, 0.09, 1), "bg_bot": (0.04, 0.06, 0.07, 1),
+        "panel": (0.09, 0.12, 0.13, 1), "panel2": (0.12, 0.16, 0.17, 1),
+        "panel3": (0.17, 0.22, 0.23, 1), "bubble_me": (0.12, 0.29, 0.25, 1),
+        "bubble_ai": (0.10, 0.14, 0.15, 1), "text": (0.94, 0.98, 0.96, 1),
+        "text_dim": (0.72, 0.81, 0.79, 1), "text_faint": (0.57, 0.67, 0.65, 1),
+        "accent": (0.32, 0.83, 0.67, 1), "accent_soft": (0.14, 0.28, 0.24, 1),
+        "accent_text": (0.04, 0.15, 0.11, 1),
+        "danger": (1.00, 0.56, 0.53, 1), "danger_bg": (0.28, 0.13, 0.13, 1),
+        "success": (0.42, 0.90, 0.70, 1), "success_bg": (0.11, 0.24, 0.19, 1),
+        "star": (1.00, 0.79, 0.47, 1), "star_bg": (0.27, 0.21, 0.13, 1),
+        "avatar_me": (0.26, 0.51, 0.45, 1), "avatar_ai": (0.14, 0.45, 0.34, 1),
+        "online": (0.42, 0.90, 0.70, 1), "chip": (0.12, 0.16, 0.17, 1),
+        "chip_text": (0.80, 0.90, 0.86, 1), "shadow": (0, 0, 0, 0.24),
+        "ring_bg": (0.06, 0.08, 0.09, 1),
     },
     "minecraft": {
         # Grass, dirt, stone and obsidian: readable block-world palette.
@@ -1774,6 +1774,7 @@ try:
 except Exception:
     DB = sqlite3.connect(":memory:", check_same_thread=False, timeout=20)
 DB.row_factory = sqlite3.Row
+DB.create_function("casefold", 1, str.casefold)
 DB_LOCK = threading.RLock()
 with DB_LOCK:
     DB.executescript("""
@@ -1832,6 +1833,15 @@ with DB_LOCK:
         CREATE INDEX IF NOT EXISTS idx_planner_tasks_done ON planner_tasks(done, id);
         CREATE INDEX IF NOT EXISTS idx_code_snippets_title ON code_snippets(title);
     """)
+    session_columns = {row["name"] for row in DB.execute("PRAGMA table_info(sessions)")}
+    for column, definition in (
+        ("pinned", "INTEGER NOT NULL DEFAULT 0"),
+        ("archived", "INTEGER NOT NULL DEFAULT 0"),
+        ("custom_title", "INTEGER NOT NULL DEFAULT 0"),
+        ("draft", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in session_columns:
+            DB.execute(f"ALTER TABLE sessions ADD COLUMN {column} {definition}")
     # Safe migration for databases created by earlier versions.
     try:
         DB.execute("ALTER TABLE messages ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
@@ -1964,8 +1974,8 @@ def db_add(role, content, sid=None, starred=False, image_path=""):
         msg_id = cur.lastrowid
         DB.execute("UPDATE sessions SET updated=? WHERE id=?", (now, sid))
         if role == "user":
-            row = DB.execute("SELECT title FROM sessions WHERE id=?", (sid,)).fetchone()
-            if row and row["title"] == "Новый чат":
+            row = DB.execute("SELECT title,custom_title FROM sessions WHERE id=?", (sid,)).fetchone()
+            if row and not row["custom_title"] and row["title"] == "Новый чат":
                 title = content.strip().splitlines()[0][:42] if content.strip() else "Новый чат"
                 DB.execute("UPDATE sessions SET title=? WHERE id=?", (title, sid))
         DB.commit()
@@ -1994,13 +2004,69 @@ def db_clear(sid=None):
     now = DT.now().strftime("%Y-%m-%d %H:%M:%S")
     with DB_LOCK:
         DB.execute("DELETE FROM messages WHERE session_id=?", (sid,))
-        DB.execute("UPDATE sessions SET title='Новый чат', updated=? WHERE id=?", (now, sid))
+        DB.execute("UPDATE sessions SET title=CASE WHEN custom_title=0 THEN 'Новый чат' ELSE title END, updated=? WHERE id=?", (now, sid))
         DB.commit()
 
 
-def db_sessions():
+def db_sessions(archived=None):
     with DB_LOCK:
-        return [dict(row) for row in DB.execute("SELECT * FROM sessions ORDER BY updated DESC").fetchall()]
+        query = "SELECT id,title,created,updated,pinned,archived,draft != '' AS has_draft FROM sessions"
+        query += " ORDER BY pinned DESC, updated DESC, rowid DESC"
+        rows = DB.execute(query).fetchall()
+        return [dict(row) for row in rows if archived is None or row["archived"] == archived]
+
+
+def db_chat_draft(sid):
+    with DB_LOCK:
+        row = DB.execute("SELECT draft FROM sessions WHERE id=?", (sid,)).fetchone()
+        return row["draft"] if row else ""
+
+
+def db_save_chat_draft(sid, draft):
+    with DB_LOCK, DB:
+        DB.execute("UPDATE sessions SET draft=? WHERE id=?", (draft, sid))
+
+
+def db_rename_chat(sid, title):
+    with DB_LOCK, DB:
+        DB.execute("UPDATE sessions SET title=?, custom_title=1 WHERE id=?", (title, sid))
+
+
+def db_toggle_chat_flag(sid, flag):
+    if flag not in ("pinned", "archived"):
+        raise ValueError("Unknown chat flag")
+    with DB_LOCK, DB:
+        DB.execute(f"UPDATE sessions SET {flag}=1-{flag} WHERE id=?", (sid,))
+
+
+def db_duplicate_chat(sid, through_id=None):
+    copy_id = uuid.uuid4().hex[:12]
+    now = DT.now().strftime("%Y-%m-%d %H:%M:%S")
+    with DB_LOCK, DB:
+        original = DB.execute("SELECT title FROM sessions WHERE id=?", (sid,)).fetchone()
+        if original is None:
+            return None
+        title = original["title"][:68] + " · копия"
+        DB.execute("INSERT INTO sessions(id,title,created,updated,custom_title) VALUES(?,?,?,?,1)",
+                   (copy_id, title, now, now))
+        query = ("INSERT INTO messages(session_id,role,content,ts,starred,image_path) "
+                 "SELECT ?,role,content,ts,starred,image_path FROM messages WHERE session_id=?")
+        params = [copy_id, sid]
+        if through_id is not None:
+            query += " AND id<=?"
+            params.append(through_id)
+        DB.execute(query + " ORDER BY id", params)
+    return copy_id
+
+
+def db_chat_report(sid):
+    with DB_LOCK:
+        rows = DB.execute(
+            "SELECT role, COUNT(*) AS total, SUM(length(content)) AS chars, "
+            "SUM(starred) AS starred, SUM(image_path != '') AS images "
+            "FROM messages WHERE session_id=? GROUP BY role", (sid,)
+        ).fetchall()
+    return {row["role"]: dict(row) for row in rows}
 
 
 def db_delete_session(sid):
@@ -2017,10 +2083,12 @@ def db_session_title(sid=None):
 
 
 def db_search(query, limit=50):
-    pattern = "%" + str(query).replace("%", "\\%").replace("_", "\\_") + "%"
     with DB_LOCK:
-        rows = DB.execute("SELECT m.*, s.title AS session_title FROM messages m LEFT JOIN sessions s ON s.id=m.session_id "
-                          "WHERE m.content LIKE ? ESCAPE '\\' ORDER BY m.id DESC LIMIT ?", (pattern, limit)).fetchall()
+        rows = DB.execute(
+            "SELECT m.*, s.title AS session_title FROM messages m "
+            "LEFT JOIN sessions s ON s.id=m.session_id "
+            "WHERE instr(casefold(m.content), ?) > 0 ORDER BY m.id DESC LIMIT ?",
+            (query.casefold(), limit)).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -2665,7 +2733,8 @@ class IconButton(ButtonBehavior, Widget):
                 Color(edge[0], edge[1], edge[2], 0.11 if STATE.get("theme") != "daylight" else 0.08)
                 Line(points=[x+dp(5), y+dp(5), x+w*0.22, y+dp(2.8)], width=dp(0.6))
         with self.canvas:
-            Color(*T("text"))
+            theme = THEMES[STATE["theme"]]
+            Color(*theme.get("accent_text" if self.bg_key == "accent" else "text", T("text")))
             cx, cy = self.center
             s = self.size_px * 0.22
             if self.icon == "plus":
@@ -2991,197 +3060,44 @@ class PromptTile(ButtonBehavior, BoxLayout):
 
 
 class WelcomePanel(BoxLayout):
-    """Aurora Studio landing card: editorial hierarchy, luminous product mark and fast actions."""
-    def __init__(self, callback, **kwargs):
-        kwargs.setdefault("size_hint", (1, None))
-        kwargs.setdefault("height", dp(590))
-        super().__init__(orientation="vertical", padding=(dp(13), dp(12)), spacing=dp(7), **kwargs)
-        self.callback = callback
-        self.bind(pos=self._sync_bg, size=self._sync_bg)
-        hero_glow = TV("glow3") or (0.12, 0.86, 1.0)
-        side_glow = TV("glow2") or (0.70, 0.22, 1.0)
-        rim_tint = T("accent")
-        with self.canvas.before:
-            Color(0, 0, 0, 0.38 if STATE.get("theme") != "daylight" else 0.055)
-            self._shadow = RoundedRectangle(pos=(self.x + dp(1), self.y - dp(4)), size=self.size, radius=[dp(27)])
-            panel = T("panel")
-            Color(panel[0], panel[1], panel[2], 0.94 if STATE.get("theme") != "daylight" else 0.99)
-            self._bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(27)])
-            # Quiet top aurora and low side bloom give glass depth without veiling text.
-            Color(hero_glow[0], hero_glow[1], hero_glow[2], 0.12 if STATE.get("theme") != "daylight" else 0.018)
-            self._glow_blue = Ellipse(pos=(self.x + self.width * 0.45, self.top - dp(135)), size=(self.width * 0.65, dp(185)))
-            Color(side_glow[0], side_glow[1], side_glow[2], 0.07 if STATE.get("theme") != "daylight" else 0.012)
-            self._glow_violet = Ellipse(pos=(self.x - dp(48), self.y + dp(24)), size=(self.width * 0.58, dp(170)))
-            Color(rim_tint[0], rim_tint[1], rim_tint[2], 0.40 if STATE.get("theme") != "daylight" else 0.06)
-            self._rim = Line(rounded_rectangle=(self.x + dp(0.7), self.y + dp(0.7), self.width - dp(1.4), self.height - dp(1.4), dp(26)), width=dp(0.8))
-            Color(1, 1, 1, 0.11 if STATE.get("theme") != "daylight" else 0.23)
-            self._sheen = Line(points=[self.x + dp(28), self.top - dp(2.2), self.right - dp(28), self.top - dp(2.2)], width=dp(0.8))
+    def __init__(self, chat, **kwargs):
+        super().__init__(orientation="vertical", size_hint_y=None, padding=dp(12),
+                         spacing=dp(10), **kwargs)
+        self.bind(minimum_height=self.setter("height"))
+        hero = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(140),
+                         padding=(dp(18), dp(14)), spacing=dp(6))
+        with hero.canvas.before:
+            Color(*T("panel"))
+            surface = RoundedRectangle(pos=hero.pos, size=hero.size, radius=[dp(18)])
+            Color(*T("accent"))
+            marker = RoundedRectangle(pos=(hero.x+dp(18), hero.top-dp(19)),
+                                      size=(dp(32), dp(3)), radius=[dp(2)])
 
-        # Brand header
-        top = BoxLayout(size_hint=(1, None), height=dp(39), spacing=dp(9))
-        top.add_widget(BrandMark(dp(34)))
-        brand = BoxLayout(orientation="vertical", spacing=0)
-        brand.add_widget(make_label("AI CHAT  /  AISH", 10.3, "text", True,
-                                    size_hint=(1, None), height=dp(19), shorten=True))
-        brand.add_widget(make_label(TV("subtitle") or "ТВОЯ AI-СТУДИЯ", 8.0, "text_dim", False,
-                                    size_hint=(1, None), height=dp(15), shorten=True))
-        top.add_widget(brand)
-        top.add_widget(Widget(size_hint_x=1))
-        status = BoxLayout(orientation="horizontal", size_hint=(None, None), size=(dp(96), dp(27)),
-                           spacing=dp(4), padding=(dp(7), dp(3)))
-        with status.canvas.before:
-            ok = T("success")
-            Color(ok[0], ok[1], ok[2], 0.10)
-            status._bg = RoundedRectangle(pos=status.pos, size=status.size, radius=[dp(14)])
-            Color(ok[0], ok[1], ok[2], 0.38)
-            status._rim = Line(rounded_rectangle=(status.x, status.y, status.width, status.height, dp(14)), width=dp(0.75))
-        def sync_status(*_):
-            status._bg.pos = status.pos; status._bg.size = status.size
-            status._rim.rounded_rectangle = (status.x, status.y, status.width, status.height, dp(14))
-        status.bind(pos=sync_status, size=sync_status)
-        status.add_widget(make_label("●", 7.7, "online", True, size_hint=(None, 1), width=dp(10), halign="center"))
-        status.add_widget(make_label("ГОТОВ", 8.0, "online", True, size_hint=(1, 1), halign="center", shorten=True))
-        top.add_widget(status)
-        self.add_widget(top)
+        def sync_hero(*_):
+            surface.pos = hero.pos
+            surface.size = hero.size
+            marker.pos = (hero.x+dp(18), hero.top-dp(19))
 
-        # New Prism status rail: compact visual separator, not a fake connectivity indicator.
-        rail = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(24), spacing=dp(6))
-        c1 = T("accent")
-        c2 = TV("glow2") or (0.53, 0.40, 1.0)
-        c3 = TV("glow3") or (0.10, 0.84, 1.0)
-        rail_colors = ((c1[0], c1[1], c1[2], 0.95), (c2[0], c2[1], c2[2], 0.82), (c3[0], c3[1], c3[2], 0.72))
-        for rail_rgba, rail_width in zip(rail_colors, (0.34, 0.33, 0.33)):
-            segment = Widget(size_hint=(rail_width, 1))
-            with segment.canvas:
-                Color(*rail_rgba)
-                segment._prism_line = RoundedRectangle(pos=segment.pos, size=segment.size,
-                                                        radius=[dp(2)])
-            def _sync_prism_line(widget, *_):
-                widget._prism_line.pos = widget.pos
-                widget._prism_line.size = widget.size
-            segment.bind(pos=_sync_prism_line, size=_sync_prism_line)
-            rail.add_widget(segment)
-        self.add_widget(rail)
-
-        # Hero: direct message first, icon second; keeps the title readable even on narrow devices.
-        hero = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(132), spacing=dp(3))
-        copy = BoxLayout(orientation="vertical", spacing=dp(2), size_hint=(1, 1))
-        copy.add_widget(make_label((TV("name") or "AURORA PRISM") + "  ·  V" + APP_VERSION, 8.0, "accent", True,
-                                   size_hint=(1, None), height=dp(17), shorten=True))
-        copy.add_widget(make_label(TV("hero") or "Создавай.\nИсследуй.\nУлучшай.", 23, "text", True,
-                                   size_hint=(1, None), height=dp(62), valign="middle"))
-        copy.add_widget(make_label(TV("description") or "Один центр для идей, знаний, кода и творчества.", 9.4, "text_dim", False,
-                                   size_hint=(1, None), height=dp(37), valign="top"))
-        hero.add_widget(copy)
-        holo = os.path.join(ROOT, "ai_holo_icon.png")
-        if STATE.get("theme") in ("minecraft", "roblox"):
-            art = BoxLayout(size_hint=(None, None), size=(dp(102), dp(104)), padding=dp(5))
-            art.add_widget(BrandMark(dp(92)))
-            hero.add_widget(art)
-        elif os.path.isfile(holo):
-            art = BoxLayout(size_hint=(None, None), size=(dp(102), dp(104)), padding=dp(1))
-            with art.canvas.before:
-                Color(0.15, 0.60, 1.0, 0.13)
-                art._glow1 = Ellipse(pos=(art.x + dp(8), art.y + dp(8)), size=(dp(86), dp(86)))
-                Color(0.64, 0.22, 1.0, 0.10)
-                art._glow2 = Ellipse(pos=(art.x + dp(17), art.y + dp(5)), size=(dp(78), dp(78)))
-            def sync_art(*_):
-                art._glow1.pos = (art.x + dp(8), art.y + dp(8)); art._glow1.size = (dp(86), dp(86))
-                art._glow2.pos = (art.x + dp(17), art.y + dp(5)); art._glow2.size = (dp(78), dp(78))
-            art.bind(pos=sync_art, size=sync_art)
-            art.add_widget(KivyImage(source=holo, size_hint=(1, 1), allow_stretch=True, keep_ratio=True, mipmap=True))
-            hero.add_widget(art)
-        else:
-            hero.add_widget(BrandMark(dp(82)))
+        hero.bind(pos=sync_hero, size=sync_hero)
+        hero.add_widget(make_label("Чем помочь?", 28, bold=True,
+                                   valign="bottom", size_hint_y=None, height=dp(60)))
+        hero.add_widget(make_label("Напиши свой вопрос или выбери, с чего начать.", 13,
+                                   "text_dim", valign="top"))
         self.add_widget(hero)
-
-        # Thin spectrum separator
-        separator = Widget(size_hint=(1, None), height=dp(2))
-        with separator.canvas:
-            sep_a = T("accent")
-            sep_b = TV("glow2") or (0.45, 0.35, 1.0)
-            sep_c = TV("glow3") or (1.0, 0.30, 0.75)
-            Color(sep_a[0], sep_a[1], sep_a[2], 0.55)
-            Line(points=[separator.x, separator.center_y, separator.x + separator.width * 0.34, separator.center_y], width=dp(1.1))
-            Color(sep_b[0], sep_b[1], sep_b[2], 0.42)
-            Line(points=[separator.x + separator.width * 0.34, separator.center_y, separator.x + separator.width * 0.68, separator.center_y], width=dp(1.1))
-            Color(sep_c[0], sep_c[1], sep_c[2], 0.32)
-            Line(points=[separator.x + separator.width * 0.68, separator.center_y, separator.right, separator.center_y], width=dp(1.1))
-        def sync_separator(*_):
-            separator.canvas.clear()
-            with separator.canvas:
-                sep_a = T("accent")
-                sep_b = TV("glow2") or (0.45, 0.35, 1.0)
-                sep_c = TV("glow3") or (1.0, 0.30, 0.75)
-                Color(sep_a[0], sep_a[1], sep_a[2], 0.55)
-                Line(points=[separator.x, separator.center_y, separator.x + separator.width * 0.34, separator.center_y], width=dp(1.1))
-                Color(sep_b[0], sep_b[1], sep_b[2], 0.42)
-                Line(points=[separator.x + separator.width * 0.34, separator.center_y, separator.x + separator.width * 0.68, separator.center_y], width=dp(1.1))
-                Color(sep_c[0], sep_c[1], sep_c[2], 0.32)
-                Line(points=[separator.x + separator.width * 0.68, separator.center_y, separator.right, separator.center_y], width=dp(1.1))
-        separator.bind(pos=sync_separator, size=sync_separator)
-        self.add_widget(separator)
-
-        # Capability chips
-        benefits = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(30), spacing=dp(7))
-        for label, tint in (("ИИ-ПОМОЩНИК", (0.32, 0.69, 1.0, 1)),
-                            ("КРЕАТИВ", (*((TV("glow2") or (0.70, 0.48, 1.0))), 1)),
-                            ("ЛИЧНАЯ ИСТОРИЯ", (*((TV("glow3") or (0.28, 0.86, 0.76))), 1))):
-            pill = BoxLayout(orientation="horizontal", padding=(dp(8), dp(4)), spacing=dp(4))
-            with pill.canvas.before:
-                Color(tint[0], tint[1], tint[2], 0.075)
-                pill._bg = RoundedRectangle(pos=pill.pos, size=pill.size, radius=[dp(9)])
-                Color(tint[0], tint[1], tint[2], 0.22)
-                pill._rim = Line(rounded_rectangle=(pill.x, pill.y, pill.width, pill.height, dp(9)), width=dp(0.6))
-            def sync_pill(*_, holder=pill):
-                holder._bg.pos = holder.pos; holder._bg.size = holder.size
-                holder._rim.rounded_rectangle = (holder.x, holder.y, holder.width, holder.height, dp(9))
-            pill.bind(pos=sync_pill, size=sync_pill)
-            pill.add_widget(make_label("•", 9, "accent", True, size_hint=(None, 1), width=dp(7), halign="center"))
-            pill.add_widget(make_label(label, 7.0, "text_dim", True, size_hint=(1, 1), halign="center", shorten=True))
-            benefits.add_widget(pill)
-        self.add_widget(benefits)
-
-        title_row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(22), spacing=dp(5))
-        title_row.add_widget(make_label("БЫСТРЫЙ СТАРТ", 9.1, "text", True, size_hint=(1, 1)))
-        title_row.add_widget(make_label("5 СЦЕНАРИЕВ", 7.5, "accent", True, size_hint=(None, 1), width=dp(78), halign="right"))
-        self.add_widget(title_row)
-
-        grid = GridLayout(cols=2, spacing=dp(8), size_hint=(1, None), height=dp(276),
-                          row_default_height=dp(88), row_force_default=True)
-        actions = [
-            ("Объясни тему", "Просто и с примерами", "AI", "Объясни просто"),
-            ("Помоги с кодом", "Написать и проверить", "</>", "Помоги с кодом"),
-            ("Создай текст", "Посты, письма, идеи", "Aa", "Создай текст"),
-            ("Нарисуй изображение", "Идея в виде арта", "*", "Нарисуй кота"),
-            ("Командная палитра", "Команды и инструменты", "settings", "Команды"),
-        ]
-        for title, desc, glyph, query in actions:
-            grid.add_widget(PromptTile(title, desc, glyph, callback=lambda value=query: self.callback(value)))
+        grid = GridLayout(cols=1, spacing=dp(8), size_hint_y=None,
+                          row_default_height=dp(76), row_force_default=True)
+        grid.bind(minimum_height=grid.setter("height"))
+        grid.bind(width=lambda obj, width: setattr(obj, "cols", 2 if width >= dp(340) else 1))
+        for title, detail, glyph, action in (
+            ("Разобраться", "Просто и с примерами", "ai",
+             lambda: chat.use_chip("Объясни просто")),
+            ("Написать текст", "Письмо или пост", "text",
+             lambda: chat.use_chip("Создай текст")),
+            ("Собрать запрос", "Редактор запроса", "sparkle", chat.open_prompt_studio),
+            ("Продолжить чат", "Мои диалоги", "history", chat.open_sessions),
+        ):
+            grid.add_widget(PromptTile(title, detail, glyph, callback=action, height=dp(76)))
         self.add_widget(grid)
-
-        footer = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(18), spacing=dp(5))
-        footer.add_widget(TechGlyph("history", dp(15), tint=T("text_faint")))
-        footer.add_widget(make_label("История хранится на устройстве", 8.0, "text_faint", False,
-                                     size_hint=(1, 1), shorten=True))
-        footer.add_widget(make_label("V" + APP_VERSION + "  ·  " + (TV("name") or "AURORA"), 7.1, "text_faint", True,
-                                     size_hint=(None, 1), width=dp(105), halign="right", shorten=True))
-        self.add_widget(footer)
-
-    def _sync_bg(self, *_):
-        try:
-            self._shadow.pos = (self.x + dp(1), self.y - dp(4))
-            self._shadow.size = self.size
-            self._bg.pos = self.pos
-            self._bg.size = self.size
-            self._rim.rounded_rectangle = (self.x + dp(0.7), self.y + dp(0.7), max(0, self.width - dp(1.4)), max(0, self.height - dp(1.4)), dp(26))
-            self._glow_blue.pos = (self.x + self.width * 0.45, self.top - dp(135))
-            self._glow_blue.size = (self.width * 0.65, dp(185))
-            self._glow_violet.pos = (self.x - dp(48), self.y + dp(24))
-            self._glow_violet.size = (self.width * 0.58, dp(170))
-            self._sheen.points = [self.x + dp(28), self.top - dp(2.2), self.right - dp(28), self.top - dp(2.2)]
-        except Exception:
-            pass
 
 
 class TypingDots(Widget):
@@ -3270,7 +3186,8 @@ def make_label(text, size=14, color_key="text", bold=False, halign="left", valig
 
 
 def popup_button(text, callback, variant="default", height=dp(48)):
-    palette = {"default": (T("panel3"), T("text")), "accent": (T("accent"), (1,1,1,1)),
+    accent_text = THEMES.get(STATE.get("theme"), {}).get("accent_text", (1, 1, 1, 1))
+    palette = {"default": (T("panel3"), T("text")), "accent": (T("accent"), accent_text),
                "danger": (T("danger_bg"), T("danger")), "success": (T("success_bg"), T("success"))}
     bg, fg = palette.get(variant, palette["default"])
     btn = Button(text=text, size_hint=(1, None), height=height)
@@ -3347,7 +3264,7 @@ class PremiumSwitch(ButtonBehavior, Widget):
 class ThemeChoice(ButtonBehavior, BoxLayout):
     """Tiny colorway preview instead of a plain text-only theme button."""
     PREVIEWS = {
-        "aurora": ((0.02, 0.03, 0.10, 1), (0.30, 0.16, 0.78, 1), (0.08, 0.84, 1.0, 1), (1.0, 0.28, 0.75, 1)),
+        "aurora": ((0.06, 0.08, 0.09, 1), (0.12, 0.29, 0.25, 1), (0.32, 0.83, 0.67, 1), (1.0, 0.79, 0.47, 1)),
         "night": ((0.03, 0.04, 0.07, 1), (0.15, 0.22, 0.40, 1), (0.35, 0.52, 0.98, 1), (0.30, 0.65, 0.95, 1)),
         "midnight": ((0.01, 0.01, 0.04, 1), (0.12, 0.06, 0.28, 1), (0.45, 0.22, 0.85, 1), (0.75, 0.38, 1.0, 1)),
         "daylight": ((0.93, 0.95, 0.98, 1), (0.82, 0.87, 0.96, 1), (0.20, 0.42, 0.90, 1), (0.35, 0.62, 0.98, 1)),
@@ -3773,6 +3690,9 @@ class ChatRoot(BoxLayout):
         self._keyboard_baseline_px = None
         self._is_landscape = Window.width > Window.height
         self._welcome_panel = None
+        self._draft_sid = None
+        self._draft_saved = ""
+        self._draft_trigger = Clock.create_trigger(self._flush_draft, 0.35)
         self._build_ui()
         # Spacer is normally zero. If Android leaves the SDL2 viewport unchanged,
         # it lifts the composer by the remaining keyboard height; if Android did
@@ -3782,10 +3702,11 @@ class ChatRoot(BoxLayout):
         Clock.schedule_once(self._sync_background, 0)
         Window.bind(size=self._adapt_orientation)
         Clock.schedule_once(lambda *_: self._install_android_keyboard_listener(), 0.7)
-        Clock.schedule_once(self._safe_initial_load, 0.12)
+        self._initial_load_event = Clock.schedule_once(self._safe_initial_load, 0)
 
     def _safe_initial_load(self, *_args):
         """Keep the UI alive if history/empty-state construction encounters a runtime error."""
+        self._initial_load_event = None
         try:
             self.load_chat()
         except Exception as exc:
@@ -3804,6 +3725,9 @@ class ChatRoot(BoxLayout):
 
     def dispose(self):
         """Detach listeners and background animation before root is destroyed or rebuilt."""
+        self._flush_draft()
+        if self._initial_load_event:
+            self._initial_load_event.cancel()
         for event_name in ("_spark_event", "_aurora_event"):
             event = getattr(self, event_name, None)
             if event is not None:
@@ -3898,70 +3822,29 @@ class ChatRoot(BoxLayout):
         # Both animations are actually suspended when disabled or the app is backgrounded.
         self._set_sparkles_enabled(bool(STATE.get("sparkle_background", True)))
 
-        header = BoxLayout(size_hint=(1, None), height=dp(70), padding=(dp(12), dp(8)), spacing=dp(7))
+        header = BoxLayout(size_hint_y=None, height=dp(62),
+                           padding=(dp(12), dp(6)), spacing=dp(8))
         self.header_widget = header
         with header.canvas.before:
-            Color(0.003, 0.005, 0.018, 0.13 if STATE.get("theme") != "daylight" else 0.04)
-            self.header_shadow = Rectangle(pos=(header.x, header.y-dp(2)), size=header.size)
-            panel = T("panel")
-            Color(panel[0], panel[1], panel[2], 0.94 if STATE.get("theme") != "daylight" else 0.97)
-            self.header_rect = Rectangle(pos=header.pos, size=header.size)
-            Color(1, 1, 1, 0.012 if STATE.get("theme") != "daylight" else 0.07)
-            self.header_glass = Rectangle(pos=(header.x, header.top-dp(2)), size=(header.width, dp(1.2)))
-        header.bind(pos=lambda *_: (setattr(self.header_rect, "pos", header.pos),
-                                    setattr(self.header_shadow, "pos", (header.x, header.y-dp(2))),
-                                    setattr(self.header_glass, "pos", (header.x, header.top-dp(2)))),
-                    size=lambda *_: (setattr(self.header_rect, "size", header.size),
-                                     setattr(self.header_shadow, "size", header.size),
-                                     setattr(self.header_glass, "size", (header.width, dp(1.2)))) )
-        with header.canvas.after:
-            accent = T("accent")
-            edge_a = accent
-            edge_b = TV("glow3") or (0.12, 0.86, 1.0)
-            edge_c = TV("glow2") or (1.0, 0.28, 0.72)
-            Color(edge_b[0], edge_b[1], edge_b[2], 0.10)
-            self.header_cyan_line = Rectangle(pos=(header.x, header.y), size=(header.width*0.30, dp(0.8)))
-            Color(edge_a[0], edge_a[1], edge_a[2], 0.36)
-            self.header_accent_line = Rectangle(pos=(header.x+header.width*0.30, header.y), size=(header.width*0.42, dp(0.8)))
-            Color(edge_c[0], edge_c[1], edge_c[2], 0.07)
-            self.header_magenta_line = Rectangle(pos=(header.x+header.width*0.72, header.y), size=(header.width*0.28, dp(0.8)))
-        def sync_header_spectrum(*_):
-            self.header_cyan_line.pos = (header.x, header.y)
-            self.header_cyan_line.size = (header.width*0.30, dp(0.8))
-            self.header_accent_line.pos = (header.x+header.width*0.30, header.y)
-            self.header_accent_line.size = (header.width*0.42, dp(0.8))
-            self.header_magenta_line.pos = (header.x+header.width*0.72, header.y)
-            self.header_magenta_line.size = (header.width*0.28, dp(0.8))
-        header.bind(pos=sync_header_spectrum, size=sync_header_spectrum)
-        header.add_widget(IconButton("plus", self.new_chat, dp(38), bg_key="panel2"))
-        header.add_widget(IconButton("search", self.open_search, dp(38), bg_key="panel2"))
-        center = BoxLayout(orientation="horizontal", spacing=dp(7), size_hint=(1, 1))
-        holo_logo_path = os.path.join(ROOT, "ai_holo_icon.png")
-        if STATE.get("theme") in ("minecraft", "roblox") or not os.path.isfile(holo_logo_path):
-            center.add_widget(BrandMark(dp(33)))
-        else:
-            center.add_widget(KivyImage(source=holo_logo_path, size_hint=(None, None), size=(dp(36), dp(36)),
-                                        allow_stretch=True, keep_ratio=True, mipmap=True))
-        title_stack = BoxLayout(orientation="vertical", spacing=0)
-        header_title = "AI Чат · Minecraft" if STATE.get("theme") == "minecraft" else "AI Чат · Roblox" if STATE.get("theme") == "roblox" else "AI Чат"
-        self.title_lbl = Label(text=header_title, color=T("text"), bold=True, font_size=F("title"),
-                               halign="left", valign="bottom", shorten=True)
-        self.title_lbl.bind(size=lambda *_: setattr(self.title_lbl, "text_size", self.title_lbl.size))
-        self.status_lbl = Label(text="ГОТОВ К РАБОТЕ", color=T("online"), font_size=sp(8),
-                                halign="left", valign="top", shorten=True)
-        self.status_lbl.bind(size=lambda *_: setattr(self.status_lbl, "text_size", self.status_lbl.size))
+            Color(*T("panel"))
+            surface = Rectangle(pos=header.pos, size=header.size)
+        header.bind(pos=lambda *_: setattr(surface, "pos", header.pos),
+                    size=lambda *_: setattr(surface, "size", header.size))
+        header.add_widget(BrandMark(dp(36)))
+        title_stack = BoxLayout(orientation="vertical")
+        self.title_lbl = make_label("Aish", 16, bold=True, shorten=True, valign="bottom")
+        self.status_lbl = make_label("", 11, "text_dim", shorten=True, valign="top")
         title_stack.add_widget(self.title_lbl)
         title_stack.add_widget(self.status_lbl)
-        center.add_widget(title_stack)
-        header.add_widget(center)
-        header.add_widget(IconButton("gear", self.open_settings, dp(38), bg_key="panel2"))
-        header.add_widget(IconButton("menu", self.open_menu, dp(38), bg_key="panel2"))
+        header.add_widget(title_stack)
+        header.add_widget(IconButton("plus", self.new_chat, dp(44), bg_key="panel2"))
+        header.add_widget(IconButton("menu", self.open_menu, dp(44), bg_key="panel2"))
         self.add_widget(header)
 
         self.scroll = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"])
         self.scroll.bind(scroll_y=self._scroll_changed)
         self.messages_box = BoxLayout(orientation="vertical", size_hint_y=None,
-                                      spacing=msg_spacing(), padding=(dp(2), dp(12)))
+                                      spacing=msg_spacing(), padding=(dp(10), dp(10)))
         self.messages_box.bind(minimum_height=self.messages_box.setter("height"))
         self.scroll.add_widget(self.messages_box)
         self.add_widget(self.scroll)
@@ -4017,7 +3900,8 @@ class ChatRoot(BoxLayout):
                                background_active="", background_color=(0, 0, 0, 0),
                                padding=(dp(3), dp(7)), write_tab=False,
                                input_type="text", keyboard_suggestions=True)
-        self.input.bind(on_text_validate=self.send, focus=self._input_focus_changed)
+        self.input.bind(on_text_validate=self.send, focus=self._input_focus_changed,
+                        text=lambda *_: self._draft_trigger())
         self.input_wrap.add_widget(self.input)
         composer.add_widget(self.input_wrap)
         self.action_slot = BoxLayout(size_hint=(None, 1), width=dp(47))
@@ -4028,6 +3912,12 @@ class ChatRoot(BoxLayout):
         self.composer_widget = composer
         self.bottom_bar.add_widget(composer)
         self.add_widget(self.bottom_bar)
+        self.navigation = BoxLayout(size_hint_y=None, height=dp(54),
+                                    padding=(dp(10), dp(4)), spacing=dp(6))
+        for title, action in (("Чаты", self.open_sessions), ("Поиск", self.open_search),
+                              ("Инструменты", self.open_tools_hub)):
+            self.navigation.add_widget(popup_button(title, action, height=dp(46)))
+        self.add_widget(self.navigation)
         self._build_chips()
         self._adapt_orientation()
 
@@ -4289,6 +4179,9 @@ class ChatRoot(BoxLayout):
             dp(4 if self._keyboard_visible else (6 if landscape else 7)),
         )
         self.bottom_bar.height = composer_h + (chips_h if visible else 0)
+        self.navigation.height = 0 if self._keyboard_visible else dp(54)
+        self.navigation.opacity = 0 if self._keyboard_visible else 1
+        self.navigation.disabled = self._keyboard_visible
 
     def _keyboard_size_changed(self, pixel_height, density=1.0):
         """Lift only the composer by the keyboard inset Android has not already handled."""
@@ -4428,7 +4321,25 @@ class ChatRoot(BoxLayout):
         except Exception:
             self.scroll.scroll_y = 0
 
+    def _flush_draft(self, *_):
+        self._draft_trigger.cancel()
+        if self._draft_sid is None:
+            return
+        text = self.input.text
+        if text != self._draft_saved:
+            db_save_chat_draft(self._draft_sid, text)
+            self._draft_saved = text
+
+    def _restore_draft(self):
+        if self._draft_sid != SESSION_ID:
+            self._flush_draft()
+            self._draft_sid = SESSION_ID
+            self._draft_saved = db_chat_draft(SESSION_ID)
+            self.input.text = self._draft_saved
+
     def load_chat(self):
+        self._restore_draft()
+        self.title_lbl.text = db_session_title()
         self.messages_box.clear_widgets()
         self.messages_box.spacing = msg_spacing()
         self.stream_bubble = None
@@ -4437,8 +4348,7 @@ class ChatRoot(BoxLayout):
         self._welcome_panel = None
         if not records:
             self._set_chips_visible(False)
-            self.title_lbl.text = "AI Чат"
-            self._welcome_panel = WelcomePanel(self.use_chip)
+            self._welcome_panel = WelcomePanel(self)
             self.messages_box.add_widget(self._welcome_panel)
         else:
             self._set_chips_visible(False)
@@ -4459,9 +4369,11 @@ class ChatRoot(BoxLayout):
                 self.add_message(role, content, ts=row["ts"][11:16], msg_id=row["id"],
                                  starred=bool(row.get("starred", 0)), interrupted=interrupted,
                                  image_path=image_path, animate=False)
-            self.title_lbl.text = "AI Чат"
         self._update_status()
-        Clock.schedule_once(lambda *_: self.scroll_to_bottom(force=True), 0.1)
+        if records:
+            Clock.schedule_once(lambda *_: self.scroll_to_bottom(force=True), 0.1)
+        else:
+            self.scroll.scroll_y = 1
 
     def add_message(self, role, text, ts="", msg_id=0, starred=False,
                     interrupted=False, image_path="", animate=True):
@@ -4639,6 +4551,7 @@ class ChatRoot(BoxLayout):
         if not text:
             return
         self.input.text = ""
+        self._flush_draft()
         low = text.lower().strip()
         sid = SESSION_ID
 
@@ -4649,6 +4562,9 @@ class ChatRoot(BoxLayout):
             "/search": self.open_search, "/поиск": self.open_search,
             "/new": self.new_chat, "/новый": self.new_chat,
             "/export": self.export_chat, "/экспорт": self.export_chat,
+            "/menu": self.open_menu, "/меню": self.open_menu,
+            "/chats": self.open_sessions, "/чаты": self.open_sessions,
+            "/stats": self.open_chat_report, "/статистика": self.open_chat_report,
             "/clear": self.confirm_clear, "/очистить": self.confirm_clear,
             "/stop": self.stop_generation, "/стоп": self.stop_generation,
         }
@@ -4675,6 +4591,9 @@ class ChatRoot(BoxLayout):
                       "`/retry` — повторить последний запрос\n"
                       "`/settings` — настройки и темы\n"
                       "`/tools` — центр инструментов\n"
+                      "`/menu` — поиск действий\n"
+                      "`/chats` — чаты и архив\n"
+                      "`/stats` — статистика чата\n"
                       "`/search` — поиск по истории\n"
                       "`/export` — сохранить текущий чат\n"
                       "`/new` — новый чат · `/clear` — очистить чат · `/stop` — остановить генерацию.\n\n"
@@ -4696,7 +4615,7 @@ class ChatRoot(BoxLayout):
                 answer_id = db_add("assistant", IDENTITY_REPLY, sid)
                 self.add_message("ai", IDENTITY_REPLY, msg_id=answer_id)
                 self._set_chips_visible(False)
-                self.title_lbl.text = "AI Чат"
+                self.title_lbl.text = db_session_title()
             except Exception as exc:
                 self.toast("Не удалось сохранить ответ: " + str(exc)[:70])
             return
@@ -4740,7 +4659,7 @@ class ChatRoot(BoxLayout):
                 aid = db_add("assistant", answer, sid)
                 self.add_message("ai", answer, msg_id=aid)
                 self._set_chips_visible(False)
-                self.title_lbl.text = "AI Чат"
+                self.title_lbl.text = db_session_title()
             return
 
         calc_match = re.match(r"^(?:/calc|посчитай|вычисли|калькулятор|сколько будет)\s+(.+)$", text, re.I | re.S)
@@ -4754,7 +4673,7 @@ class ChatRoot(BoxLayout):
             aid = db_add("assistant", answer, sid)
             self.add_message("ai", answer, msg_id=aid)
             self._set_chips_visible(False)
-            self.title_lbl.text = "AI Чат"
+            self.title_lbl.text = db_session_title()
             return
 
         image_match = re.match(r"^(?:/draw|нарисуй|картинка|сгенерируй(?: изображение)?)\s+(.+)$", text, re.I | re.S)
@@ -4791,7 +4710,7 @@ class ChatRoot(BoxLayout):
                 self.cancel_event = None
                 self.request_kind = None
                 self._set_busy(False)
-                self.title_lbl.text = "AI Чат"
+                self.title_lbl.text = db_session_title()
             generate_image(prompt, done, image_cancel)
             return
 
@@ -4802,7 +4721,7 @@ class ChatRoot(BoxLayout):
             return
         self.add_message("me", text, msg_id=user_id)
         self._set_chips_visible(False)
-        self.title_lbl.text = "AI Чат"
+        self.title_lbl.text = db_session_title()
         self.request_id = uuid.uuid4().hex
         rid = self.request_id
         self.request_kind = "chat"
@@ -5080,23 +4999,24 @@ class ChatRoot(BoxLayout):
 
     # Message actions / favorites / regeneration
     def open_message_actions(self, bubble):
-        popup = RoundedPopup(size_hint=(0.90, 0.70))
-        popup.container.add_widget(make_label("Действия с сообщением", 19, bold=True,
-                                              height=dp(38), size_hint=(1, None)))
+        popup, _, listing = self._workspace_list("Действия с сообщением")
         preview = Label(text=bubble.text[:220], color=T("text_dim"), font_size=sp(12),
                         halign="left", valign="middle", size_hint=(1, None),
                         height=dp(65), padding=(dp(10), dp(8)))
         preview.bind(size=lambda *_: setattr(preview, "text_size", preview.size))
-        popup.container.add_widget(preview)
-        popup.container.add_widget(popup_button("Копировать", lambda: (self.copy_text(bubble.text), popup.dismiss())))
+        listing.add_widget(preview)
+        listing.add_widget(popup_button("Копировать", lambda: (self.copy_text(bubble.text), popup.dismiss())))
         if ANDROID:
-            popup.container.add_widget(popup_button("Озвучить", lambda: (threading.Thread(target=voice_output, args=(bubble.text,), daemon=True).start(), popup.dismiss())))
-        popup.container.add_widget(popup_button("Сохранить в заметки", lambda: (db_note_add(bubble.text), popup.dismiss(), self.toast("Сохранено в заметки"))))
+            listing.add_widget(popup_button("Озвучить", lambda: (threading.Thread(target=voice_output, args=(bubble.text,), daemon=True).start(), popup.dismiss())))
+        listing.add_widget(popup_button("Сохранить в заметки", lambda: (db_note_add(bubble.text), popup.dismiss(), self.toast("Сохранено в заметки"))))
         label = "Убрать из избранного" if bubble.starred else "Добавить в избранное"
-        popup.container.add_widget(popup_button(label, lambda: self._toggle_star(bubble, popup), "accent"))
+        listing.add_widget(popup_button(label, lambda: self._toggle_star(bubble, popup), "accent"))
+        if bubble.msg_id:
+            listing.add_widget(popup_button(
+                "Ответвить чат отсюда",
+                lambda: self._duplicate_chat(SESSION_ID, popup, through_id=bubble.msg_id)))
         if bubble.role == "ai" and bubble.msg_id:
-            popup.container.add_widget(popup_button("Перегенерировать ответ", lambda: self._regenerate(bubble, popup)))
-        popup.container.add_widget(popup_button("Закрыть", popup.dismiss))
+            listing.add_widget(popup_button("Перегенерировать ответ", lambda: self._regenerate(bubble, popup)))
         popup.open()
 
     def open_quick_actions(self, bubble):
@@ -5295,131 +5215,68 @@ class ChatRoot(BoxLayout):
             self.input.focus = True
             self.toast("Запрос добавлен в поле ввода")
 
-    def open_menu(self):
-        if self.busy:
-            self.toast("Заверши генерацию или нажми Стоп перед открытием меню")
-            return
-        popup = RoundedPopup(size_hint=(0.94, 0.90))
-        head = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(68), spacing=dp(10))
-        logo_path = os.path.join(ROOT, "ai_holo_icon.png")
-        if os.path.isfile(logo_path):
-            head.add_widget(KivyImage(source=logo_path, size_hint=(None, None), size=(dp(58), dp(58)),
-                                      allow_stretch=True, keep_ratio=True, mipmap=True))
-        else:
-            head.add_widget(BrandMark(dp(48)))
-        copy = BoxLayout(orientation="vertical", spacing=dp(1))
-        copy.add_widget(make_label("AI CHAT  /  AISH", 16, "text", True, size_hint=(1, None), height=dp(27)))
-        copy.add_widget(make_label("ТВОЁ ПРОСТРАНСТВО ИДЕЙ", 8.2, "accent", True, size_hint=(1, None), height=dp(17)))
-        copy.add_widget(make_label("GAMEVERSE NEXUS  ·  V42", 7.5, "text_faint", False, size_hint=(1, None), height=dp(15)))
-        head.add_widget(copy)
-        popup.container.add_widget(head)
-
-        # A premium command banner forms a clear visual hierarchy before utilities.
-        banner = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(78), padding=(dp(13), dp(9)), spacing=dp(2))
-        with banner.canvas.before:
-            Color(0, 0, 0, 0.25)
-            banner._shadow = RoundedRectangle(pos=(banner.x, banner.y-dp(1)), size=(banner.width, banner.height+dp(1)), radius=[dp(17)])
-            Color(0.30, 0.18, 0.96, 0.14)
-            banner._bg = RoundedRectangle(pos=banner.pos, size=banner.size, radius=[dp(17)])
-            Color(0.08, 0.82, 1.0, 0.22)
-            banner._rim = Line(rounded_rectangle=(banner.x, banner.y, banner.width, banner.height, dp(17)), width=dp(0.75))
-            Color(1.0, 0.26, 0.79, 0.18)
-            banner._sheen = Line(points=[banner.x+dp(17), banner.top-dp(2), banner.right-dp(17), banner.top-dp(2)], width=dp(0.7))
-        banner.bind(pos=lambda *_: self._sync_menu_banner(banner), size=lambda *_: self._sync_menu_banner(banner))
-        banner.add_widget(make_label("ТВОЯ СЛЕДУЮЩАЯ ИДЕЯ НАЧИНАЕТСЯ ЗДЕСЬ", 8.1, "accent", True,
-                                     size_hint=(1, None), height=dp(16), shorten=True))
-        banner.add_widget(make_label("Новый диалог, мастер запроса или нужный инструмент — одним касанием.",
-                                     10.2, "text", False, size_hint=(1, None), height=dp(36), valign="top"))
-        popup.container.add_widget(banner)
-
-        scroll = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"])
-        listing = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(9), padding=(dp(1), dp(4), dp(1), dp(9)))
+    @staticmethod
+    def _workspace_list(title, hint=None, footer=None):
+        popup = RoundedPopup(size_hint=(0.94, 0.91))
+        popup.container.add_widget(make_label(title, 21, bold=True, shorten=True,
+                                              size_hint_y=None, height=dp(38)))
+        field = None
+        if hint:
+            field = TextInput(hint_text=hint, multiline=False, size_hint_y=None, height=dp(44),
+                              foreground_color=T("text"), hint_text_color=T("text_dim"),
+                              font_size=sp(14), background_normal="", background_active="",
+                              background_color=T("panel2"), padding=(dp(10), dp(10)))
+            popup.container.add_widget(field)
+        scroll = ScrollView(do_scroll_x=False)
+        listing = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(6),
+                            padding=(0, dp(3)))
         listing.bind(minimum_height=listing.setter("height"))
         scroll.add_widget(listing)
-        listing.add_widget(make_label("БЫСТРЫЕ ДЕЙСТВИЯ", 8.2, "accent", True,
-                                      size_hint=(1, None), height=dp(17)))
-        grid = GridLayout(cols=2, spacing=dp(8), size_hint=(1, None), height=dp(174),
-                          row_default_height=dp(82), row_force_default=True)
-        quick = [
-            ("Новый чат", "Чистый лист", "ai", self.new_chat),
-            ("История чатов", "Продолжить диалог", "history", self.open_sessions),
-            ("Поиск", "Найти в переписках", "search", self.open_search),
-            ("Мастер запроса", "Собрать сильный промпт", "sparkle", self.open_prompt_studio),
-        ]
-        for title, desc, glyph, cb in quick:
-            grid.add_widget(PromptTile(title, desc, glyph, callback=lambda action=cb: (popup.dismiss(), action())))
-        listing.add_widget(grid)
-
-        listing.add_widget(make_label("БИБЛИОТЕКА И ИНСТРУМЕНТЫ", 8.2, "accent", True,
-                                      size_hint=(1, None), height=dp(17)))
-        secondary = [
-            ("Центр инструментов", "Калькулятор, текст, конвертер и таймер", "sparkle", self.open_tools_hub, "accent"),
-            ("AI SuperLab", "Большой каталог функций по 18 направлениям", "ai", self.open_ai_capability_catalog, "accent"),
-            ("Поиск в интернете", "Поиск и извлечение текста публичных страниц", "search", self.open_web_research, "default"),
-            ("Библиотека промптов", "Готовые запросы для 14 сценариев", "text", self.open_prompt_library, "default"),
-            ("Заметки", "Личные записи и идеи", "notes", self.open_notes, "default"),
-            ("Избранное", "Сохранённые ответы", "star", self.open_starred, "default"),
-            ("Символы и эмодзи", "Быстрые вставки в поле ввода", "sparkle", self.open_emoji_picker, "default"),
-            ("Экспорт чата", "Сохранить переписку в файл", "file", self.export_chat, "default"),
-            ("Настройки", "Оформление, поведение и ИИ", "settings", self.open_settings, "accent"),
-            ("Очистить текущий чат", "Удалить сообщения этого диалога", "chat", self.confirm_clear, "danger"),
-        ]
-        for label, description, glyph, callback, variant in secondary:
-            row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(48), spacing=dp(8), padding=(dp(7), dp(4)))
-            with row.canvas.before:
-                Color(0, 0, 0, 0.18)
-                row._shadow = RoundedRectangle(pos=(row.x, row.y-dp(1)), size=row.size, radius=[dp(13)])
-                panel = T("panel2")
-                Color(panel[0], panel[1], panel[2], 0.88)
-                row._bg = RoundedRectangle(pos=row.pos, size=row.size, radius=[dp(13)])
-                ac = T("danger" if variant == "danger" else "accent")
-                Color(ac[0], ac[1], ac[2], 0.26)
-                row._rim = Line(rounded_rectangle=(row.x, row.y, row.width, row.height, dp(13)), width=dp(0.65))
-            def sync_row(_obj, _value, holder=row):
-                holder._shadow.pos = (holder.x, holder.y-dp(1)); holder._shadow.size = holder.size
-                holder._bg.pos = holder.pos; holder._bg.size = holder.size
-                holder._rim.rounded_rectangle = (holder.x, holder.y, holder.width, holder.height, dp(13))
-            row.bind(pos=sync_row, size=sync_row)
-            tint = T("danger") if variant == "danger" else T("accent")
-            row.add_widget(TechGlyph(glyph, dp(32), tint=tint))
-            texts = BoxLayout(orientation="vertical", spacing=0)
-            texts.add_widget(make_label(label, 10.1, "danger" if variant == "danger" else "text", True,
-                                        size_hint=(1, None), height=dp(21), shorten=True))
-            texts.add_widget(make_label(description, 8.2, "text_dim", False,
-                                        size_hint=(1, None), height=dp(17), shorten=True))
-            row.add_widget(texts)
-            arrow = make_label("›", 20, "accent" if variant != "danger" else "danger", True,
-                               size_hint=(None, 1), width=dp(18), halign="center")
-            row.add_widget(arrow)
-            # Keep the clickable control separate from canvas visuals; behavior is reliable on Android.
-            action = Button(background_normal="", background_down="", background_color=(0, 0, 0, 0),
-                            size_hint=(1, None), height=dp(48))
-            action.bind(on_release=lambda *_args, cb=callback: (popup.dismiss(), cb()))
-            shell = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(48))
-            # Overlay the transparent tap surface over the decorative row using a FloatLayout.
-            from kivy.uix.floatlayout import FloatLayout
-            holder = FloatLayout(size_hint=(1, None), height=dp(48))
-            row.size_hint = (1, 1)
-            holder.add_widget(row)
-            action.pos_hint = {"x": 0, "y": 0}
-            action.size_hint = (1, 1)
-            holder.add_widget(action)
-            listing.add_widget(holder)
         popup.container.add_widget(scroll)
-        popup.container.add_widget(popup_button("Закрыть меню", popup.dismiss, "default", dp(43)))
-        popup.open()
+        if footer:
+            popup.container.add_widget(footer)
+        popup.container.add_widget(popup_button("Закрыть", popup.dismiss, height=dp(42)))
+        return popup, field, listing
 
-    @staticmethod
-    def _sync_menu_banner(banner):
-        try:
-            banner._shadow.pos = (banner.x, banner.y-dp(1))
-            banner._shadow.size = (banner.width, banner.height+dp(1))
-            banner._bg.pos = banner.pos
-            banner._bg.size = banner.size
-            banner._rim.rounded_rectangle = (banner.x, banner.y, banner.width, banner.height, dp(17))
-            banner._sheen.points = [banner.x+dp(17), banner.top-dp(2), banner.right-dp(17), banner.top-dp(2)]
-        except Exception:
-            pass
+    def open_menu(self):
+        if self.busy:
+            self.toast("Дождись окончания генерации или нажми Стоп")
+            return
+        popup, field, listing = self._workspace_list("Меню Aish", "Найти действие…")
+        actions = (
+            ("Новый чат", self.new_chat),
+            ("Мои чаты и архив", self.open_sessions),
+            ("Поиск по сообщениям", self.open_search),
+            ("Мастер запроса", self.open_prompt_studio),
+            ("Центр инструментов", self.open_tools_hub),
+            ("Каталог возможностей ИИ", self.open_ai_capability_catalog),
+            ("Поиск в интернете", self.open_web_research),
+            ("Библиотека промптов", self.open_prompt_library),
+            ("Заметки", self.open_notes),
+            ("Избранные сообщения", self.open_starred),
+            ("Символы и эмодзи", self.open_emoji_picker),
+            ("Статистика текущего чата", self.open_chat_report),
+            ("Копировать текущий чат", self.copy_current_chat),
+            ("Экспорт текущего чата", self.open_chat_export),
+            ("Настройки", self.open_settings),
+            ("Очистить текущий чат", self.confirm_clear),
+        )
+        def render(*_):
+            listing.clear_widgets()
+            query = field.text.casefold().strip()
+            for title, action in actions:
+                if query in title.casefold():
+                    variant = "danger" if action == self.confirm_clear else "default"
+                    listing.add_widget(popup_button(
+                        title, lambda callback=action: (popup.dismiss(), callback()), variant))
+            if not listing.children:
+                listing.add_widget(make_label("Действия не найдены", 13, "text_dim",
+                                               size_hint_y=None, height=dp(42)))
+            listing.parent.scroll_y = 1
+
+        field.bind(text=render)
+        render()
+        popup.open()
 
     def copy_current_chat(self):
         body = "\n\n".join(("Ты" if row["role"] == "user" else "AI") + ": " + row["content"]
@@ -7076,7 +6933,7 @@ class ChatRoot(BoxLayout):
         # Appearance
         card = section("ВНЕШНИЙ ВИД", "Персонализируй цвета, текст и плотность интерфейса")
         selector(card, "Тема и игровая вселенная", "theme", [
-            ("aurora", "Aurora"), ("night", "Ночь"), ("midnight", "Полночь"), ("daylight", "День"),
+            ("aurora", "Aish"), ("night", "Ночь"), ("midnight", "Полночь"), ("daylight", "День"),
             ("minecraft", "Minecraft"), ("roblox", "Roblox")])
         card.add_widget(make_label("⛏ Minecraft — зелёный, чёрный и земляные блоки.  ◈ Roblox — графит, красный и белый. Выбери карточку и нажми «Готово».",
                                    9.3, "text_dim", size_hint=(1, None), height=dp(34), valign="top"))
@@ -7303,30 +7160,137 @@ class ChatRoot(BoxLayout):
         popup.container.add_widget(popup_button("Закрыть", popup.dismiss, "accent"))
         popup.open()
 
-    def open_sessions(self):
-        popup = RoundedPopup()
-        popup.container.add_widget(make_label("Мои чаты", 21, bold=True,
-                                              size_hint=(1, None), height=dp(42)))
-        scroll = ScrollView(do_scroll_x=False)
-        listing = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(7), padding=(0, dp(4)))
-        listing.bind(minimum_height=listing.setter("height")); scroll.add_widget(listing)
-        for session in db_sessions():
-            row = BoxLayout(size_hint=(1, None), height=dp(54), spacing=dp(5))
-            title = session["title"][:32]
-            open_btn = Button(text=title + "\n" + session["updated"][:16], halign="left", valign="middle")
-            style_button(open_btn, T("accent") if session["id"] == SESSION_ID else T("panel3"),
-                         (1, 1, 1, 1) if session["id"] == SESSION_ID else T("text"), 12)
-            open_btn.bind(on_release=lambda *_args, sid=session["id"]: self.open_chat_by_id(sid, popup))
-            delete = Button(text="×", size_hint=(None, 1), width=dp(43))
-            style_button(delete, T("danger_bg"), T("danger"), 18, True)
-            delete.bind(on_release=lambda *_args, sid=session["id"], t=title: self.ask_delete_session(sid, t, popup))
-            row.add_widget(open_btn); row.add_widget(delete); listing.add_widget(row)
-        popup.container.add_widget(scroll)
-        popup.container.add_widget(popup_button("Новый чат", lambda: (popup.dismiss(), self.new_chat()), "accent"))
-        popup.container.add_widget(popup_button("Закрыть", popup.dismiss))
+    def open_sessions(self, archived=False):
+        self._flush_draft()
+        tabs = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+        popup, field, listing = self._workspace_list("Мои чаты", "Найти по названию…", tabs)
+        selected = {"archived": archived}
+        active_tab = popup_button("Активные", lambda: switch(False), height=dp(44))
+        archive_tab = popup_button("Архив", lambda: switch(True), height=dp(44))
+        tabs.add_widget(active_tab)
+        tabs.add_widget(archive_tab)
+        tabs.add_widget(popup_button("+ Новый", lambda: (popup.dismiss(), self.new_chat()),
+                                     "accent", dp(44)))
+
+        def switch(show_archived):
+            selected["archived"] = show_archived
+            render()
+
+        def render(*_):
+            listing.clear_widgets()
+            active_tab.disabled = not selected["archived"]
+            archive_tab.disabled = selected["archived"]
+            query = field.text.strip().casefold()
+            sessions = db_sessions(archived=selected["archived"])
+            for session in sessions:
+                if query not in session["title"].casefold():
+                    continue
+                sid = session["id"]
+                row = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(6))
+                markers = []
+                if sid == SESSION_ID:
+                    markers.append("Открыт")
+                if session["pinned"]:
+                    markers.append("Закреплён")
+                if session["has_draft"]:
+                    markers.append("Черновик")
+                subtitle = " · ".join(markers) or session["updated"][:16]
+                button = popup_button(session["title"][:32] + "\n" + subtitle,
+                                      lambda value=sid: self.open_chat_by_id(value, popup),
+                                      height=dp(58))
+                button.halign = "left"
+                button.valign = "middle"
+                button.max_lines = 2
+                button.padding = (dp(10), 0)
+                button.bind(size=lambda obj, size: setattr(obj, "text_size", size))
+                row.add_widget(button)
+                options = popup_button("...", lambda value=session: self._chat_options(value, popup, render),
+                                       height=dp(58))
+                options.size_hint_x = None
+                options.width = dp(48)
+                row.add_widget(options)
+                listing.add_widget(row)
+            if not listing.children:
+                text = "Чаты не найдены" if query else "Здесь пока нет чатов"
+                listing.add_widget(make_label(text, 13, "text_dim", size_hint_y=None, height=dp(46)))
+            listing.parent.scroll_y = 1
+
+        field.bind(text=render)
+        render()
         popup.open()
 
-    def ask_delete_session(self, sid, title, parent_popup):
+    def _chat_options(self, session, library, refresh):
+        if self.busy:
+            self.toast("Дождись окончания генерации или нажми Стоп")
+            return
+        sid = session["id"]
+        popup, _, listing = self._workspace_list(session["title"])
+
+        def toggle(flag):
+            db_toggle_chat_flag(sid, flag)
+            popup.dismiss()
+            refresh()
+
+        for label, action, variant in (
+            ("Переименовать", lambda: self._rename_chat(sid, popup, refresh), "default"),
+            ("Открепить" if session["pinned"] else "Закрепить", lambda: toggle("pinned"), "default"),
+            ("Вернуть из архива" if session["archived"] else "В архив",
+             lambda: toggle("archived"), "default"),
+            ("Создать копию", lambda: self._duplicate_chat(sid, popup, library), "default"),
+            ("Статистика", lambda: self.open_chat_report(sid), "default"),
+            ("Экспорт", lambda: self.open_chat_export(sid), "default"),
+            ("Удалить", lambda: self.ask_delete_session(sid, session["title"], popup, refresh), "danger"),
+        ):
+            listing.add_widget(popup_button(label, action, variant))
+        popup.open()
+
+    def _rename_chat(self, sid, parent, refresh):
+        popup, field, listing = self._workspace_list("Название чата", "До 80 символов")
+        field.text = db_session_title(sid)
+
+        def save(*_):
+            title = field.text.strip()[:80]
+            if not title:
+                return
+            db_rename_chat(sid, title)
+            if sid == SESSION_ID:
+                self.title_lbl.text = title
+            popup.dismiss()
+            parent.dismiss()
+            refresh()
+
+        field.bind(on_text_validate=save)
+        listing.add_widget(popup_button("Сохранить", save, "accent"))
+        popup.open()
+
+    def _duplicate_chat(self, sid, *popups, through_id=None):
+        if self.busy:
+            self.toast("Дождись окончания генерации или нажми Стоп")
+            return
+        copied = db_duplicate_chat(sid, through_id)
+        if copied:
+            for popup in popups:
+                popup.dismiss()
+            self.open_chat_by_id(copied)
+            self.toast("Создана копия чата")
+
+    def open_chat_report(self, sid=None):
+        popup, _, listing = self._workspace_list("Статистика чата")
+        report = db_chat_report(sid or SESSION_ID)
+        listing.add_widget(make_label(db_session_title(sid), 15, bold=True, shorten=True,
+                                      size_hint_y=None, height=dp(40)))
+        for caption, value in (
+            ("Сообщения пользователя", report.get("user", {}).get("total", 0)),
+            ("Ответы ИИ", report.get("assistant", {}).get("total", 0)),
+            ("Символы", sum(row["chars"] for row in report.values())),
+            ("Избранные сообщения", sum(row["starred"] for row in report.values())),
+            ("Сообщения с изображением", sum(row["images"] for row in report.values())),
+        ):
+            listing.add_widget(make_label(f"{caption} · {value}", 14,
+                                          size_hint_y=None, height=dp(39)))
+        popup.open()
+
+    def ask_delete_session(self, sid, title, parent_popup, refresh):
         confirm = Popup(title="Удалить чат?", title_color=T("text"), separator_color=T("danger"),
                         background_color=T("panel"), size_hint=(0.82, 0.34))
         box = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(9))
@@ -7341,20 +7305,17 @@ class ChatRoot(BoxLayout):
             confirm.dismiss()
             was_current = sid == SESSION_ID
             db_delete_session(sid)
-            remaining = db_sessions()
+            remaining = db_sessions(archived=False)
             if was_current:
                 if remaining:
                     SESSION_ID = remaining[0]["id"]
                     _meta_set("session_id", SESSION_ID)
                 else:
                     SESSION_ID = new_session()
-            elif not remaining:
-                SESSION_ID = new_session()
-            try:
-                parent_popup.dismiss()
-            except Exception:
-                pass
-            self.load_chat()
+            parent_popup.dismiss()
+            if was_current:
+                self.load_chat()
+            refresh()
         yes.bind(on_release=do_delete)
         no.bind(on_release=lambda *_: confirm.dismiss())
         row.add_widget(yes); row.add_widget(no); box.add_widget(row)
@@ -7433,25 +7394,49 @@ class ChatRoot(BoxLayout):
                 style_button(btn, T("panel3"), T("text"), 12)
                 btn.bind(on_release=lambda *_args, sid=result["session_id"]: self.open_chat_by_id(sid, popup))
                 listing.add_widget(btn)
-        inp.bind(on_text_validate=search)
+        pending_search = Clock.create_trigger(search, 0.25)
+        inp.bind(on_text_validate=search, text=lambda *_: pending_search())
+        popup.bind(on_dismiss=lambda *_: pending_search.cancel())
         popup.container.add_widget(popup_button("Найти", search, "accent"))
         popup.container.add_widget(popup_button("Закрыть", popup.dismiss))
         popup.open()
 
-    def export_chat(self):
+    def open_chat_export(self, sid=None):
+        popup, _, listing = self._workspace_list("Экспорт чата")
+        for label, extension in (("Обычный текст (.txt)", "txt"),
+                                 ("Markdown (.md)", "md"), ("Данные (.json)", "json")):
+            listing.add_widget(popup_button(
+                label, lambda fmt=extension: self.export_chat(fmt, sid=sid)))
+        popup.open()
+
+    def export_chat(self, fmt="txt", sid=None):
+        sid = sid or SESSION_ID
         try:
-            rows = db_messages(limit=10000, sid=SESSION_ID)
+            with DB_LOCK:
+                rows = DB.execute(
+                    "SELECT role,content,ts,starred FROM messages WHERE session_id=? ORDER BY id",
+                    (sid,)).fetchall()
+                title = db_session_title(sid)
             if not rows:
                 self.toast("В чате пока нет сообщений")
                 return None
-            path = os.path.join(ROOT, "chat_" + DT.now().strftime("%Y%m%d_%H%M%S") + ".txt")
-            with open(path, "w", encoding="utf-8") as file:
-                for row in rows:
-                    who = "Ты" if row["role"] == "user" else "AI"
-                    file.write(f"{who} [{row['ts']}]:\n{row['content']}\n\n")
+            path = os.path.join(ROOT, f"chat_{DT.now():%Y%m%d_%H%M%S_%f}.{fmt}")
+            with open(path, "x", encoding="utf-8") as file:
+                if fmt == "json":
+                    json.dump({"title": title, "messages": [dict(row) for row in rows]},
+                              file, ensure_ascii=False, indent=2)
+                else:
+                    if fmt == "md":
+                        file.write(f"# {title}\n\n")
+                    for row in rows:
+                        who = "Вы" if row["role"] == "user" else "ИИ"
+                        heading = f"{who} · {row['ts']}"
+                        if fmt == "md":
+                            heading = f"## {heading}"
+                        file.write(f"{heading}\n{row['content']}\n\n")
             self.toast("Файл сохранён: " + os.path.basename(path))
             return path
-        except Exception as exc:
+        except (OSError, sqlite3.Error) as exc:
             self.toast("Ошибка экспорта: " + str(exc)[:70])
             return None
 
@@ -7469,7 +7454,7 @@ class ChatRoot(BoxLayout):
 
 class ChatApp(App):
     def build(self):
-        self.title = "AI Chat GameVerse v41"
+        self.title = "Aish"
         Window.clearcolor = T("bg_top")
         self.root_widget = ChatRoot()
         return self.root_widget
@@ -7675,10 +7660,15 @@ class ChatApp(App):
     def on_pause(self):
         try:
             if getattr(self, "root_widget", None):
+                self.root_widget._flush_draft()
                 self.root_widget._set_sparkles_enabled(False)
         except Exception as exc:
             print("[Lifecycle] Could not pause decorative effects:", repr(exc))
         return True
+
+    def on_stop(self):
+        if getattr(self, "root_widget", None):
+            self.root_widget.dispose()
 
     def on_resume(self):
         try:
