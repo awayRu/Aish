@@ -7,8 +7,8 @@ source.dir = .
 source.include_exts = py,png,jpg,jpeg,webp,gif,kv,atlas
 
 # Public app release version and Android in-place update code.
-version = 1.44
-android.numeric_version = 44
+version = 1.45
+android.numeric_version = 45
 
 requirements = python3,kivy==2.1.0,pyjnius,certifi,pillow,pypdf
 

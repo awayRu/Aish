@@ -37,7 +37,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "44"
+APP_VERSION = "45"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -62,6 +62,10 @@ from kivy.uix.widget import Widget
 from kivy.uix.modalview import ModalView
 from kivy.uix.image import Image as KivyImage
 from kivy.properties import NumericProperty
+from kivy.uix.screenmanager import NoTransition, Screen, ScreenManager
+from kivy.utils import platform as kivy_platform
+
+from aish_mobile import Glyph, GlassArtwork, NavButton, PALETTE, ProgressDial, surface
 
 # Android keyboard handling:
 # Use resize mode so Android reduces the app viewport instead of panning the
@@ -171,6 +175,8 @@ THEMES = {
     },
 }
 
+THEMES["aurora"].update(PALETTE)
+
 THEME_VISUALS = {
     "aurora": {"name": "AURORA PRISM", "subtitle": "ТВОЯ AI-СТУДИЯ", "hero": "Создавай.\nИсследуй.\nУлучшай.",
                 "description": "Неоновая студия для идей, знаний, кода и творчества.", "style": "glass",
@@ -204,7 +210,21 @@ FONTS = {
 }
 SPACING = {"compact": dp(1), "normal": dp(5), "comfortable": dp(10)}
 
+HORDE_URL = "https://oai.aihorde.net/v1/chat/completions"
+HORDE_MODELS = (
+    ("Qwen3.8 Flash", "Qwen/Qwen3.8-Flash-Next"),
+    ("Llama 3.2 3B", "koboldcpp/Llama-3.2-3B-Instruct"),
+    ("Liquid LFM3", "koboldcpp/LFM3-1.7B-Q8_0.gguf"),
+    ("Qwen3 14B", "koboldcpp/Qwen3-14B"),
+)
+YANDEX_NAME = "YandexGPT Pro 5.1"
+YANDEX_CONFIG = (os.getenv("YANDEX_FOLDER_ID", "").strip(), os.getenv("YANDEX_API_KEY", "").strip())
+
 PROVIDERS = [
+    {"name": name, "url": HORDE_URL, "model": model, "key": "0000000000",
+     "stream": True, "max_tokens": 1200}
+    for name, model in HORDE_MODELS
+] + [
     {"name": "KeylessAI", "url": "https://keylessai.thryx.workers.dev/v1/chat/completions",
      "model": "auto", "key": None, "stream": True},
     {"name": "Kilo", "url": "https://api.kilo.ai/api/gateway/chat/completions",
@@ -1902,7 +1922,7 @@ _SETTING_DEFAULTS = {
 _SETTING_CHOICES = {
     "theme": set(THEMES), "font_size": set(FONTS), "font_weight": {"normal", "bold"},
     "font_family": {"roboto", "serif", "mono", "noto"},
-    "msg_spacing": set(SPACING), "provider_preference": {"auto", "KeylessAI", "Kilo", "LLM7", "Pollinations"},
+    "msg_spacing": set(SPACING), "provider_preference": {"auto", "Pollinations", YANDEX_NAME} | {p["name"] for p in PROVIDERS},
     "creativity": {"precise", "balanced", "creative"},
     "response_length": {"short", "normal", "long"},
     "image_size": {"512", "768"},
@@ -2398,12 +2418,14 @@ def _stream_request(req, on_chunk=None, cancel_event=None):
 def try_provider(provider, messages, on_chunk=None, cancel_event=None):
     headers = {"Content-Type": "application/json", "Accept": "text/event-stream, application/json", "User-Agent": UA}
     if provider.get("key"):
-        headers["Authorization"] = "Bearer " + provider["key"]
+        headers["Authorization"] = provider.get("auth_scheme", "Bearer") + " " + provider["key"]
+    headers.update(provider.get("headers", {}))
     history = messages[-10:] if provider["name"] == "Pollinations" else messages
     temperature = {"precise": 0.25, "balanced": 0.7, "creative": 1.0}.get(
         STATE.get("creativity", "balanced"), 0.7)
     max_tokens = {"short": 800, "normal": 1800, "long": 3000}.get(
         STATE.get("response_length", "normal"), 1800)
+    max_tokens = min(max_tokens, provider.get("max_tokens", max_tokens))
     use_stream = bool(provider.get("stream") and STATE.get("streaming", True))
     payload = {"model": provider["model"], "messages": history, "temperature": temperature,
                "max_tokens": max_tokens, "stream": use_stream}
@@ -2474,6 +2496,17 @@ def _provider_list():
     if IMAGE_API_KEY:
         providers.append(pollinations)
     preferred = STATE.get("provider_preference", "auto")
+    if preferred == YANDEX_NAME:
+        folder, key = YANDEX_CONFIG
+        if not folder or not key:
+            return []
+        return [{
+            "name": YANDEX_NAME,
+            "url": "https://ai.api.cloud.yandex.net/v1/chat/completions",
+            "model": f"gpt://{folder}/yandexgpt-5.1",
+            "key": key, "auth_scheme": "Api-Key", "stream": True,
+            "headers": {"OpenAI-Project": folder},
+        }]
     if preferred != "auto":
         picked = [p for p in providers if p.get("name") == preferred]
         others = [p for p in providers if p.get("name") != preferred]
@@ -2490,6 +2523,8 @@ def _provider_list():
 def ask_ai(messages, on_chunk=None, cancel_event=None):
     errors = []
     available = _provider_list()
+    if not available and STATE.get("provider_preference") == YANDEX_NAME:
+        return None, "Для Яндекс AI Studio укажи ключ и идентификатор каталога в меню моделей."
     if not available:
         return None, "Выбранный провайдер недоступен: проверь ключ API или включи автоматический резерв."
     for provider in available:
@@ -2754,11 +2789,9 @@ class IconButton(ButtonBehavior, Widget):
                 for off in (-s*0.65, 0, s*0.65):
                     Ellipse(pos=(cx-dp(2), cy+off-dp(2)), size=(dp(4), dp(4)))
             elif self.icon == "send":
-                Color(1, 1, 1, 0.18)
-                Ellipse(pos=(cx-s*1.08, cy-s*1.08), size=(s*2.16, s*2.16))
-                Color(1, 1, 1, 1)
-                Triangle(points=[cx-s*0.82, cy+s*0.76, cx+s*1.0, cy, cx-s*0.82, cy-s*0.76])
-                Line(points=[cx-s*0.34, cy, cx+s*0.22, cy], width=dp(1.6))
+                Line(points=[cx-s, cy+s*.19, cx+s, cy+s*.90, cx+s*.31, cy-s*.94,
+                             cx-s*.08, cy-s*.19, cx-s, cy+s*.19], width=dp(1.6), joint="round")
+                Line(points=[cx-s*.08, cy-s*.19, cx+s*.74, cy+s*.61], width=dp(1.4))
             elif self.icon == "stop":
                 Color(1, 1, 1, 1)
                 RoundedRectangle(pos=(cx-s*0.55, cy-s*0.55), size=(s*1.1, s*1.1), radius=[dp(3)])
@@ -3154,10 +3187,10 @@ class RoundedPopup(ModalView):
         with outer.canvas.before:
             Color(0, 0, 0, 0.48 if STATE.get("theme") != "daylight" else 0.10)
             self.shadow = RoundedRectangle(pos=(outer.x, outer.y-dp(4)), size=outer.size, radius=[dp(26)])
-            Color(0.62, 0.34, 1.00, 0.13 if STATE.get("theme") != "daylight" else 0.06)
+            Color(*T("accent")[:3], 0.11 if STATE.get("theme") != "daylight" else 0.06)
             self.pink_rim = RoundedRectangle(pos=(outer.x-dp(0.8), outer.y-dp(0.3)),
                                               size=(outer.width+dp(1.6), outer.height+dp(1.1)), radius=[dp(26)])
-            Color(0.12, 0.82, 1.0, 0.36 if STATE.get("theme") != "daylight" else 0.15)
+            Color(*T("accent")[:3], 0.30 if STATE.get("theme") != "daylight" else 0.15)
             self.cyan_rim = Line(rounded_rectangle=(outer.x, outer.y, outer.width, outer.height, dp(25)), width=dp(0.9))
             panel = T("panel")
             Color(panel[0], panel[1], panel[2], 0.94 if STATE.get("theme") != "daylight" else 0.985)
@@ -3405,7 +3438,8 @@ class MessageBubble(BoxLayout):
                 radius=[dp(18), dp(18), dp(5) if is_me else dp(18), dp(18)])
         self.bubble.bind(pos=self._sync_bubble, size=self._sync_bubble)
 
-        fg = (1, 1, 1, 1) if is_me else T("text")
+        self._user_mint = is_me and STATE["theme"] == "aurora"
+        fg = T("accent_text") if self._user_mint else ((1, 1, 1, 1) if is_me else T("text"))
         formatted, self._markdown_links = render_markdown(self.text, F("body"))
         self.body = Label(text=formatted, color=fg,
                           font_name=font_path(), font_size=F("body"),
@@ -3442,7 +3476,7 @@ class MessageBubble(BoxLayout):
                 footer.add_widget(star)
             footer.add_widget(Widget(size_hint_x=1))
             if STATE["show_time"]:
-                time_label = Label(text=self.ts, color=T("text_faint"),
+                time_label = Label(text=self.ts, color=T("accent_text") if self._user_mint else T("text_faint"),
                                    font_size=F("ts"), size_hint=(None, 1),
                                    width=dp(42), halign="right", valign="middle")
                 time_label.bind(size=lambda *_args, w=time_label: setattr(w, "text_size", w.size))
@@ -3693,6 +3727,8 @@ class ChatRoot(BoxLayout):
         self._draft_sid = None
         self._draft_saved = ""
         self._draft_trigger = Clock.create_trigger(self._flush_draft, 0.35)
+        self._focus_state = {"duration": 1500, "remaining": 1500., "deadline": None}
+        self._focus_event = None
         self._build_ui()
         # Spacer is normally zero. If Android leaves the SDL2 viewport unchanged,
         # it lifts the composer by the remaining keyboard height; if Android did
@@ -3726,9 +3762,17 @@ class ChatRoot(BoxLayout):
     def dispose(self):
         """Detach listeners and background animation before root is destroyed or rebuilt."""
         self._flush_draft()
+        voice_callback = getattr(self, "_voice_callback", None)
+        if voice_callback:
+            try:
+                from android import activity
+                activity.unbind(on_activity_result=voice_callback)
+            except ImportError:
+                pass
+            self._voice_callback = None
         if self._initial_load_event:
             self._initial_load_event.cancel()
-        for event_name in ("_spark_event", "_aurora_event"):
+        for event_name in ("_spark_event", "_aurora_event", "_focus_event"):
             event = getattr(self, event_name, None)
             if event is not None:
                 try:
@@ -3777,21 +3821,22 @@ class ChatRoot(BoxLayout):
                     pixel_rect = Rectangle(pos=(self.x+bx*self.width, self.y+by*self.height),
                                            size=(bw*self.width, bh*self.height))
                     self._pixel_blocks.append((bx, by, bw, bh, pixel_instruction, pixel_rect))
+            accent_glow = 0 if STATE["theme"] == "aurora" else 1
             glow = T("accent")
-            Color(glow[0], glow[1], glow[2], 0.035 if STATE.get("theme") != "daylight" else 0.010)
+            Color(glow[0], glow[1], glow[2], 0.035 * accent_glow if STATE.get("theme") != "daylight" else 0.010)
             self.bg_glow = Ellipse(pos=(self.x-dp(90), self.top-dp(300)), size=(self.width+dp(180), dp(470)))
             cool = T("avatar_ai")
-            Color(cool[0], cool[1], cool[2], 0.018 if STATE.get("theme") != "daylight" else 0.006)
+            Color(cool[0], cool[1], cool[2], 0.018 * accent_glow if STATE.get("theme") != "daylight" else 0.006)
             self.bg_glow_2 = Ellipse(pos=(self.right-dp(220), self.y+dp(45)), size=(self.width*0.82, dp(310)))
             # Layered translucent color fields imitate liquid holographic film on mobile GPUs.
             # Keep the alpha low so message text and the keyboard never lose contrast.
             glow2, glow3, glow4 = TV("glow2"), TV("glow3"), TV("glow4")
             glow2, glow3, glow4 = glow2 or (1.0, 0.245, 0.735), glow3 or (0.1, 0.84, 1.0), glow4 or (0.57, 0.325, 1.0)
-            self.bg_glow_3_color = Color(glow2[0], glow2[1], glow2[2], 0.012 if STATE.get("theme") != "daylight" else 0.004)
+            self.bg_glow_3_color = Color(glow2[0], glow2[1], glow2[2], 0.012 * accent_glow if STATE.get("theme") != "daylight" else 0.004)
             self.bg_glow_3 = Ellipse(pos=(self.x+dp(10), self.y+dp(180)), size=(self.width*0.72, dp(410)))
-            self.bg_glow_4_color = Color(glow3[0], glow3[1], glow3[2], 0.010 if STATE.get("theme") != "daylight" else 0.004)
+            self.bg_glow_4_color = Color(glow3[0], glow3[1], glow3[2], 0.010 * accent_glow if STATE.get("theme") != "daylight" else 0.004)
             self.bg_glow_4 = Ellipse(pos=(self.right-self.width*0.68, self.top-dp(510)), size=(self.width*0.75, dp(360)))
-            self.bg_glow_5_color = Color(glow4[0], glow4[1], glow4[2], 0.008 if STATE.get("theme") != "daylight" else 0.003)
+            self.bg_glow_5_color = Color(glow4[0], glow4[1], glow4[2], 0.008 * accent_glow if STATE.get("theme") != "daylight" else 0.003)
             self.bg_glow_5 = Ellipse(pos=(self.x+self.width*0.10, self.y+dp(40)), size=(self.width*0.60, dp(250)))
             # Elegant orbital contour lines add depth without busy textures.
             halo = T("accent")
@@ -3822,24 +3867,37 @@ class ChatRoot(BoxLayout):
         # Both animations are actually suspended when disabled or the app is backgrounded.
         self._set_sparkles_enabled(bool(STATE.get("sparkle_background", True)))
 
+        self.mobile_screens = ScreenManager(transition=NoTransition())
+        self.chat_screen = Screen(name="chat")
+        self.section_screen = Screen(name="section")
+        self.chat_layout = BoxLayout(orientation="vertical")
+        self.chat_screen.add_widget(self.chat_layout)
+        self.mobile_screens.add_widget(self.chat_screen)
+        self.mobile_screens.add_widget(self.section_screen)
+        self.add_widget(self.mobile_screens)
+
         header = BoxLayout(size_hint_y=None, height=dp(62),
                            padding=(dp(12), dp(6)), spacing=dp(8))
         self.header_widget = header
         with header.canvas.before:
             Color(*T("panel"))
-            surface = Rectangle(pos=header.pos, size=header.size)
-        header.bind(pos=lambda *_: setattr(surface, "pos", header.pos),
-                    size=lambda *_: setattr(surface, "size", header.size))
-        header.add_widget(BrandMark(dp(36)))
+            header_background = Rectangle(pos=header.pos, size=header.size)
+        header.bind(pos=lambda *_: setattr(header_background, "pos", header.pos),
+                    size=lambda *_: setattr(header_background, "size", header.size))
+        header.add_widget(Glyph("brand", T("accent"), size_hint_x=None, width=dp(26)))
         title_stack = BoxLayout(orientation="vertical")
-        self.title_lbl = make_label("Aish", 16, bold=True, shorten=True, valign="bottom")
+        self.title_lbl = make_label("Aish", 23, bold=True, shorten=True, valign="bottom")
         self.status_lbl = make_label("", 11, "text_dim", shorten=True, valign="top")
         title_stack.add_widget(self.title_lbl)
         title_stack.add_widget(self.status_lbl)
         header.add_widget(title_stack)
-        header.add_widget(IconButton("plus", self.new_chat, dp(44), bg_key="panel2"))
+        self.model_button = popup_button(self._model_label(), self.open_model_picker, height=dp(44))
+        self.model_button.size_hint_x = None
+        self.model_button.size_hint_y = 1
+        self.model_button.width = dp(104)
+        header.add_widget(self.model_button)
         header.add_widget(IconButton("menu", self.open_menu, dp(44), bg_key="panel2"))
-        self.add_widget(header)
+        self.chat_layout.add_widget(header)
 
         self.scroll = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"])
         self.scroll.bind(scroll_y=self._scroll_changed)
@@ -3847,7 +3905,7 @@ class ChatRoot(BoxLayout):
                                       spacing=msg_spacing(), padding=(dp(10), dp(10)))
         self.messages_box.bind(minimum_height=self.messages_box.setter("height"))
         self.scroll.add_widget(self.messages_box)
-        self.add_widget(self.scroll)
+        self.chat_layout.add_widget(self.scroll)
 
         self.bottom_bar = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(128), spacing=dp(0))
         self.chips_scroll = ScrollView(size_hint=(1, None), height=dp(48), do_scroll_x=True, do_scroll_y=False, bar_width=0, scroll_type=["content"])
@@ -3873,11 +3931,7 @@ class ChatRoot(BoxLayout):
             self.composer_rect = RoundedRectangle(pos=(composer.x+dp(7), composer.y+dp(5)),
                 size=(max(0,composer.width-dp(14)), max(0,composer.height-dp(10))), radius=[dp(25)])
         composer.bind(pos=self._sync_composer_skin, size=self._sync_composer_skin)
-        # Text-first composer: no broken camera/photo controls. The smile icon is drawn with canvas primitives.
-        emoji_button = IconButton("smile", self.open_emoji_picker, dp(39), bg_key="panel2")
-        composer.add_widget(emoji_button)
-        if ANDROID:
-            composer.add_widget(IconButton("mic", self.voice_click, dp(40)))
+        composer.add_widget(IconButton("plus", self.open_composer_actions, dp(37), bg_key="panel2"))
         self.input_wrap = BoxLayout(padding=(dp(12), dp(8)))
         with self.input_wrap.canvas.before:
             Color(0, 0, 0, 0.07)
@@ -3894,7 +3948,7 @@ class ChatRoot(BoxLayout):
             self.input_highlight = Line(points=[self.input_wrap.x+dp(18), self.input_wrap.top-dp(2.5),
                 self.input_wrap.right-dp(18), self.input_wrap.top-dp(2.5)], width=dp(0.65))
         self.input_wrap.bind(pos=self._sync_input_skin, size=self._sync_input_skin)
-        self.input = TextInput(hint_text="Напиши сообщение…", multiline=False, font_size=F("body"),
+        self.input = TextInput(hint_text="Сообщение для Aish", multiline=False, font_size=F("body"),
                                foreground_color=T("text"), cursor_color=T("accent"),
                                hint_text_color=T("text_dim"), background_normal="",
                                background_active="", background_color=(0, 0, 0, 0),
@@ -3904,6 +3958,8 @@ class ChatRoot(BoxLayout):
                         text=lambda *_: self._draft_trigger())
         self.input_wrap.add_widget(self.input)
         composer.add_widget(self.input_wrap)
+        if ANDROID or kivy_platform == "android":
+            composer.add_widget(IconButton("mic", self.voice_click, dp(35)))
         self.action_slot = BoxLayout(size_hint=(None, 1), width=dp(47))
         self.send_button = IconButton("send", self.send, dp(45), bg_key="accent")
         self.stop_button = IconButton("stop", self.stop_generation, dp(45), bg_key="danger")
@@ -3911,15 +3967,571 @@ class ChatRoot(BoxLayout):
         composer.add_widget(self.action_slot)
         self.composer_widget = composer
         self.bottom_bar.add_widget(composer)
-        self.add_widget(self.bottom_bar)
-        self.navigation = BoxLayout(size_hint_y=None, height=dp(54),
-                                    padding=(dp(10), dp(4)), spacing=dp(6))
-        for title, action in (("Чаты", self.open_sessions), ("Поиск", self.open_search),
-                              ("Инструменты", self.open_tools_hub)):
-            self.navigation.add_widget(popup_button(title, action, height=dp(46)))
+        self.chat_layout.add_widget(self.bottom_bar)
+        self.navigation = BoxLayout(size_hint_y=None, height=dp(62),
+                                    padding=(dp(7), dp(5)), spacing=dp(2))
+        surface(self.navigation, T("panel"), T("panel3"), radius=0)
+        self.mobile_tabs = {}
+        for key, label, icon, action in (
+            ("chat", "Чат", "chat", self.show_mobile_chat),
+            ("history", "Диалоги", "history", self.open_mobile_history),
+            ("studio", "Студия", "studio", self.open_mobile_studio),
+            ("tools", "Инструменты", "tools", self.open_mobile_tools),
+            ("more", "Ещё", "more", self.open_mobile_more),
+        ):
+            tab = NavButton(label, icon, action, self._nav_color)
+            self.mobile_tabs[key] = tab
+            self.navigation.add_widget(tab)
         self.add_widget(self.navigation)
+        self._activate_mobile_tab("chat")
         self._build_chips()
         self._adapt_orientation()
+
+    @staticmethod
+    def _nav_color(key):
+        if key == "accent_text":
+            return THEMES[STATE["theme"]].get(key, (1, 1, 1, 1))
+        return T(key)
+
+    def _activate_mobile_tab(self, key):
+        for name, tab in self.mobile_tabs.items():
+            tab.set_active(name == key)
+
+    def show_mobile_chat(self):
+        self.mobile_screens.current = "chat"
+        self._activate_mobile_tab("chat")
+
+    def _mobile_welcome(self):
+        page = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(14),
+                         padding=(dp(6), dp(58), dp(6), dp(20)))
+        page.bind(minimum_height=page.setter("height"))
+        path = os.path.join(ROOT, "aish-welcome-art.png")
+        if os.path.isfile(path):
+            page.add_widget(GlassArtwork(path, size_hint_y=None, height=dp(248)))
+        else:
+            page.add_widget(Glyph("brand", T("accent"), size_hint_y=None, height=dp(150)))
+        page.add_widget(make_label("Что разберём?", 29, bold=True, halign="center",
+                                   size_hint_y=None, height=dp(45)))
+        chips = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(5))
+        for caption, prompt in (("Объяснить", "Объясни простыми словами: "),
+                                ("Написать", "Помоги написать текст: "),
+                                ("Разобрать код", "Разбери этот код:\n")):
+            chips.add_widget(popup_button(caption, lambda value=prompt: self._mobile_draft(value), height=dp(42)))
+        page.add_widget(chips)
+        return page
+
+    def _mobile_draft(self, text):
+        if self.busy:
+            self.toast("Заверши текущую генерацию")
+            return
+        self.show_mobile_chat()
+        self.input.text = text
+        self.input.focus = True
+
+    def _add_mobile_reply_actions(self, bubble):
+        actions = BoxLayout(size_hint_y=None, height=dp(37), spacing=dp(4))
+        actions.add_widget(popup_button("Копировать", lambda: self.copy_text(bubble.text), height=dp(37)))
+        actions.add_widget(popup_button("Избранное", lambda: self._toggle_star(bubble),
+                                        "success" if bubble.starred else "default", dp(37)))
+        actions.add_widget(popup_button("Заново", lambda: self._regenerate(bubble), height=dp(37)))
+        bubble.bubble.add_widget(actions)
+
+    def _mobile_section(self, key, title, back=None):
+        self.input.focus = False
+        self.section_screen.clear_widgets()
+        page = BoxLayout(orientation="vertical")
+        top = BoxLayout(size_hint_y=None, height=dp(57), padding=(dp(16), dp(5)), spacing=dp(9))
+        surface(top, T("panel"), T("panel3"), radius=0)
+        if back:
+            top.add_widget(NavButton("Назад", "back", back, self._nav_color, size_hint_x=None, width=dp(54)))
+        else:
+            top.add_widget(Glyph("brand", T("accent"), size_hint_x=None, width=dp(27)))
+        top.add_widget(make_label("Aish", 22, bold=True))
+        page.add_widget(top)
+        scroller = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"])
+        content = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(10),
+                            padding=(dp(16), dp(14), dp(16), dp(18)))
+        content.bind(minimum_height=content.setter("height"))
+        scroller.add_widget(content)
+        page.add_widget(scroller)
+        self.section_screen.add_widget(page)
+        self.mobile_screens.current = "section"
+        self._activate_mobile_tab(key)
+        content.add_widget(make_label(title, 26, bold=True, size_hint_y=None, height=dp(44)))
+        return content
+
+    @staticmethod
+    def _mobile_field(hint="", height=46, multiline=False, **kwargs):
+        return TextInput(hint_text=hint, multiline=multiline, size_hint_y=None,
+                         height=dp(height), font_size=sp(14), foreground_color=T("text"),
+                         hint_text_color=T("text_dim"), cursor_color=T("accent"),
+                         padding=(dp(11), dp(10)), background_normal="", background_active="",
+                         background_color=T("panel2"), write_tab=False, **kwargs)
+
+    @staticmethod
+    def _mobile_heading(text):
+        return make_label(text, 16, bold=True, size_hint_y=None, height=dp(30))
+
+    def _mobile_card(self, label, icon, callback, subtitle=""):
+        row = NavButton(label, icon, callback, self._nav_color, size_hint_y=None, height=dp(66))
+        row.orientation = "horizontal"
+        row.spacing = dp(7)
+        row.padding = (dp(8), dp(7))
+        row.remove_widget(row.caption)
+        row.glyph.size_hint = (None, 1)
+        row.glyph.width = dp(28)
+        names = BoxLayout(orientation="vertical", spacing=dp(1))
+        names.add_widget(make_label(label, 14, bold=True, shorten=True))
+        if subtitle:
+            names.add_widget(make_label(subtitle, 11, "text_dim", shorten=True))
+        row.add_widget(names)
+        row.add_widget(make_label("›", 18, "text_dim", halign="center", size_hint_x=None, width=dp(10)))
+        surface(row, T("panel2"), T("panel3"), radius=13)
+        return row
+
+    def _mobile_links(self, page, links):
+        for label, detail, icon, action in links:
+            page.add_widget(self._mobile_card(label, icon, action, detail))
+
+    def open_mobile_history(self):
+        page = self._mobile_section("history", "Диалоги")
+        query = self._mobile_field("Найти в чатах")
+        page.add_widget(query)
+        page.add_widget(popup_button("+ Новый чат", self.new_chat, "accent"))
+        tabs = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(6))
+        show_archive = False
+        active = popup_button("Активные", lambda: switch(False), "accent", dp(42))
+        archived = popup_button("Архив", lambda: switch(True), height=dp(42))
+        tabs.add_widget(active)
+        tabs.add_widget(archived)
+        page.add_widget(tabs)
+        listing = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(7))
+        listing.bind(minimum_height=listing.setter("height"))
+        page.add_widget(listing)
+
+        def switch(value):
+            nonlocal show_archive
+            show_archive = value
+            render()
+
+        def render(*_):
+            listing.clear_widgets()
+            active.disabled, archived.disabled = not show_archive, show_archive
+            needle = query.text.strip().casefold()
+            matches = {item["session_id"] for item in db_search(needle, limit=200)} if needle else set()
+            sessions = [row for row in db_sessions(show_archive)
+                        if not needle or needle in row["title"].casefold() or row["id"] in matches]
+            if not sessions:
+                listing.add_widget(self._mobile_heading("Диалоги не найдены" if needle else "Диалогов пока нет"))
+            previous = None
+            today = DT.now().date()
+            for row in sessions:
+                date = row["updated"][:10]
+                if row["pinned"]:
+                    group = "Закреплённые"
+                elif date == today.isoformat():
+                    group = "Сегодня"
+                elif date == today.fromordinal(today.toordinal()-1).isoformat():
+                    group = "Вчера"
+                else:
+                    group = date
+                if group != previous:
+                    listing.add_widget(self._mobile_heading(group))
+                    previous = group
+                item = BoxLayout(size_hint_y=None, height=dp(65), spacing=dp(5))
+                card = self._mobile_card(row["title"], "chat",
+                    lambda sid=row["id"]: self.open_chat_by_id(sid),
+                    "Черновик" if row["has_draft"] else row["updated"][11:16])
+                card.size_hint_y = 1
+                item.add_widget(card)
+                more = popup_button("···", lambda value=row: self._chat_options(value, None, render), height=dp(65))
+                more.size_hint_x = None
+                more.width = dp(43)
+                item.add_widget(more)
+                listing.add_widget(item)
+
+        query.bind(text=render)
+        render()
+
+    def open_mobile_studio(self):
+        page = self._mobile_section("studio", "Студия")
+        self._mobile_links(page, (
+            ("Библиотека запросов", "Шаблоны для текста, кода и учёбы", "studio", self.open_prompt_library),
+            ("Мастер запроса", "Задача, контекст, формат и тон", "chat", self.open_mobile_prompt),
+            ("Учебная лаборатория", "Карточки, тьютор и мини-тест", "history", self.open_mobile_learning),
+            ("AI SuperLab", "Профили, поиск и генерация изображений", "studio", self.open_mobile_superlab),
+        ))
+
+    def open_mobile_prompt(self):
+        page = self._mobile_section("studio", "Мастер запроса", self.open_mobile_studio)
+        fields = []
+        for label, hint, height in (("Задача", "Составить план урока", 46), ("Контекст", "Для 8 класса", 82),
+                                    ("Формат ответа", "Короткий список", 46), ("Тон", "Простой", 46)):
+            page.add_widget(self._mobile_heading(label))
+            field = self._mobile_field(hint, height=height, multiline=height > 46)
+            page.add_widget(field)
+            fields.append((label, field))
+
+        def apply():
+            if not fields[0][1].text.strip():
+                self.toast("Укажи задачу")
+                return
+            self._mobile_draft("\n\n".join(f"{label}: {field.text.strip()}"
+                                           for label, field in fields if field.text.strip()))
+
+        page.add_widget(popup_button("Открыть в чате", apply, "accent"))
+
+    def open_mobile_learning(self):
+        page = self._mobile_section("studio", "Учебная лаборатория", self.open_mobile_studio)
+        cards = (
+            ("Что такое фотосинтез?", "Растения используют свет, воду и углекислый газ для образования сахаров."),
+            ("Зачем нужен хлорофилл?", "Он поглощает свет, который даёт энергию фотосинтезу."),
+            ("Какова роль устьиц?", "Устьица регулируют газообмен и испарение воды."),
+        )
+        index, revealed = 0, False
+        progress = self._mobile_heading("Карточки · 1 из 3")
+        card = make_label(cards[0][0], 21, bold=True, halign="center", size_hint_y=None, height=dp(153))
+        card.color = (.03, .12, .11, 1)
+        surface(card, (.88, .96, .93, 1), radius=20)
+        page.add_widget(progress)
+        page.add_widget(card)
+
+        def update():
+            card.text = cards[index][int(revealed)]
+            card.font_size = sp(17 if revealed else 21)
+            progress.text = f"Карточки · {index + 1} из {len(cards)}"
+            reveal.text = "Показать вопрос" if revealed else "Показать ответ"
+
+        def flip():
+            nonlocal revealed
+            revealed = not revealed
+            update()
+
+        def advance():
+            nonlocal index, revealed
+            index, revealed = (index + 1) % len(cards), False
+            update()
+
+        actions = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(5))
+        reveal = popup_button("Показать ответ", flip, "accent")
+        actions.add_widget(reveal)
+        actions.add_widget(popup_button("Следующая", advance))
+        page.add_widget(actions)
+        topic = self._mobile_field("Свой предмет или тема")
+        page.add_widget(topic)
+        modes = GridLayout(cols=2, size_hint_y=None, height=dp(100), spacing=dp(6))
+        for label, instruction in (
+            ("Тьютор", "Объясни по шагам и проверь моё понимание по теме"),
+            ("Мини-тест", "Проведи мини-тест по одному вопросу по теме"),
+            ("Карточки", "Создай карточки с вопросами и короткими ответами по теме"),
+            ("Экзамен", "Проведи пробный устный экзамен по теме"),
+        ):
+            modes.add_widget(popup_button(label, lambda value=instruction: self._mobile_draft(
+                value + ": " + (topic.text.strip() or "[укажи тему]")), height=dp(46)))
+        page.add_widget(modes)
+
+    def open_mobile_tools(self):
+        page = self._mobile_section("tools", "Инструменты")
+        grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(9))
+        grid.bind(minimum_height=grid.setter("height"))
+        for label, icon, action in (
+            ("Текст", "studio", self.open_mobile_text_lab),
+            ("Калькулятор", "tools", self.open_calculator_tool),
+            ("Конвертер", "tools", self.open_unit_converter),
+            ("JSON и CSV", "tools", self.open_csv_json_converter),
+            ("Проверка JSON", "tools", self.open_json_validator),
+            ("RegEx", "tools", self.open_regex_tool),
+            ("Кодировки", "tools", self.open_encoding_tool),
+            ("Сравнение", "history", self.open_text_compare),
+            ("Фокус и задачи", "history", self.open_mobile_focus),
+            ("Библиотека кода", "studio", self.open_snippet_vault),
+        ):
+            grid.add_widget(self._mobile_card(label, icon, action))
+        page.add_widget(grid)
+        page.add_widget(popup_button("Все утилиты", self.open_tools_hub))
+
+    def open_mobile_text_lab(self):
+        page = self._mobile_section("tools", "Лаборатория текста", self.open_mobile_tools)
+        editor = self._mobile_field("Вставь текст", 170, multiline=True, text=self.input.text)
+        page.add_widget(editor)
+        status = make_label("", 13, "text_dim", halign="center", size_hint_y=None, height=dp(52))
+        surface(status, T("panel2"), T("panel3"))
+        page.add_widget(status)
+
+        def stats(*_):
+            text = editor.text
+            status.text = f"Слова · {len(text.split())}     Символы · {len(text)}     Строки · {len(text.splitlines())}"
+
+        editor.bind(text=stats)
+        stats()
+        actions = GridLayout(cols=2, size_hint_y=None, height=dp(94), spacing=dp(5))
+        actions.add_widget(popup_button("Очистить пробелы", lambda: setattr(editor, "text", "\n".join(
+            " ".join(line.split()) for line in editor.text.splitlines())), height=dp(43)))
+        actions.add_widget(popup_button("Убрать повторы", lambda: setattr(editor, "text", "\n".join(
+            dict.fromkeys(editor.text.splitlines()))), height=dp(43)))
+        actions.add_widget(popup_button("Копировать", lambda: self.copy_text(editor.text), height=dp(43)))
+        actions.add_widget(popup_button("Другие операции", self.open_text_lab, height=dp(43)))
+        page.add_widget(actions)
+        page.add_widget(popup_button("Передать в чат", lambda: self._mobile_draft(editor.text), "accent"))
+
+    def open_mobile_focus(self):
+        page = self._mobile_section("tools", "Фокус и задачи", self.open_mobile_tools)
+        state = self._focus_state
+        dial = ProgressDial(T, size_hint_y=None, height=dp(205))
+        timer = make_label("25:00", 43, bold=True, halign="center")
+        dial.add_widget(timer)
+        dial.bind(pos=lambda *_: setattr(timer, "pos", dial.pos), size=lambda *_: setattr(timer, "size", dial.size))
+        page.add_widget(dial)
+
+        def tick(*_):
+            if state["deadline"] is not None:
+                state["remaining"] = max(0, state["deadline"] - time.monotonic())
+            seconds = math.ceil(state["remaining"])
+            timer.text = f"{seconds // 60:02d}:{seconds % 60:02d}"
+            dial.fraction = state["remaining"] / state["duration"]
+            dial.draw()
+            if not state["remaining"] and state["deadline"] is not None:
+                state["deadline"] = None
+                start.text = "Старт снова"
+                self.toast("Фокус-интервал завершён")
+                return False
+            return True
+
+        def toggle():
+            if state["deadline"] is not None:
+                tick()
+                state["deadline"] = None
+                self._focus_event.cancel()
+                start.text = "Продолжить"
+            else:
+                if not state["remaining"]:
+                    state["remaining"] = state["duration"]
+                state["deadline"] = time.monotonic() + state["remaining"]
+                self._focus_event = Clock.schedule_interval(tick, .25)
+                start.text = "Пауза"
+                tick()
+
+        start = popup_button("Пауза" if state["deadline"] is not None else "Старт", toggle, "accent")
+        page.add_widget(start)
+        if self._focus_event:
+            self._focus_event.cancel()
+        if tick() and state["deadline"] is not None:
+            self._focus_event = Clock.schedule_interval(tick, .25)
+        page.add_widget(self._mobile_heading("Задачи"))
+        with DB_LOCK:
+            tasks = DB.execute("SELECT id,title,done FROM planner_tasks ORDER BY done,id DESC LIMIT 12").fetchall()
+
+        def complete_task(button, task_id, title):
+            with DB_LOCK, DB:
+                DB.execute("UPDATE planner_tasks SET done=1-done WHERE id=?", (task_id,))
+                row = DB.execute("SELECT done FROM planner_tasks WHERE id=?", (task_id,)).fetchone()
+            if row is not None:
+                button.text = ("[×] " if row["done"] else "[ ] ") + title
+
+        for task in tasks:
+            button = popup_button(("[×] " if task["done"] else "[ ] ") + task["title"], lambda: None)
+            button.bind(on_release=lambda item, key=task["id"], title=task["title"]: complete_task(item, key, title))
+            page.add_widget(button)
+        page.add_widget(popup_button("Управление задачами", self.open_task_planner))
+
+    def open_mobile_superlab(self):
+        page = self._mobile_section("studio", "AI SuperLab", self.open_mobile_studio)
+        self._mobile_links(page, (
+            ("Профили ИИ", "Выбери роль ассистента", "studio", self.open_ai_profiles),
+            ("Поиск в интернете", "Найди публичные источники", "history", self.open_web_research),
+            ("Генерация изображений", "Опиши желаемую картинку", "studio", lambda: self._mobile_draft("Нарисуй ")),
+            ("Интеграции", "HTTP, GraphQL и вебхуки", "tools", self.open_integration_connector),
+            ("Сценарии работы", "Собери план из нескольких шагов", "tools", self.open_agent_workflow_builder),
+            ("Каталог навыков", "Все возможности SuperLab", "studio", self.open_ai_capability_catalog),
+        ))
+
+    def open_mobile_more(self):
+        page = self._mobile_section("more", "Ещё")
+        self._mobile_links(page, (
+            ("Заметки и избранное", "Сохраняй идеи и ответы", "studio", self.open_mobile_personal),
+            ("Проекты", "Контекст для каждой задачи", "history", self.open_mobile_projects),
+            ("Память и знания", "Факты и документы", "studio", self.open_mobile_knowledge),
+            ("Настройки", "Оформление, ответы и модели", "tools", self.open_mobile_settings),
+            ("Данные и приватность", "Экспорт и резервная копия", "more", self.open_mobile_data),
+        ))
+
+    def open_mobile_personal(self):
+        page = self._mobile_section("more", "Заметки и избранное", self.open_mobile_more)
+        tabs = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
+        page.add_widget(tabs)
+        listing = BoxLayout(orientation="vertical", spacing=dp(8), size_hint_y=None)
+        listing.bind(minimum_height=listing.setter("height"))
+        page.add_widget(listing)
+
+        def fill(starred=False):
+            listing.clear_widgets()
+            for row in db_starred(80) if starred else db_notes():
+                value = row["content"] if starred else row["text"]
+                title = value.splitlines()[0][:70] if value.strip() else "Заметка"
+                if starred:
+                    action = lambda sid=row["session_id"]: self.open_chat_by_id(sid)
+                else:
+                    action = lambda text=value: self._mobile_note_detail(text)
+                listing.add_widget(self._mobile_card(title, "chat", action, row["ts"][:10]))
+            if not listing.children:
+                listing.add_widget(self._mobile_heading("Нет избранных ответов" if starred else "Заметок пока нет"))
+            listing.add_widget(popup_button("Все избранные" if starred else "+ Новая заметка",
+                                            self.open_starred if starred else self.open_notes, "accent"))
+        tabs.add_widget(popup_button("Заметки", lambda: fill(), "accent", dp(46)))
+        tabs.add_widget(popup_button("Избранное", lambda: fill(True), height=dp(46)))
+        fill()
+
+    def _mobile_note_detail(self, text):
+        popup, _, listing = self._workspace_list("Заметка")
+        listing.add_widget(self._mobile_field(height=190, multiline=True, text=text, readonly=True))
+        listing.add_widget(popup_button("Копировать", lambda: self.copy_text(text)))
+        popup.open()
+
+    def open_mobile_projects(self):
+        page = self._mobile_section("more", "Проекты", self.open_mobile_more)
+        for project in db_project_items():
+            def activate(project_id=project["id"]):
+                db_project_activate(project_id)
+                self.open_mobile_projects()
+            detail = "Активный проект" if project["active"] else (project["context"][:80] or "Нет описания")
+            page.add_widget(self._mobile_card(project["title"], "history", activate, detail))
+        page.add_widget(popup_button("+ Новый проект", self.open_project_workspace, "accent"))
+        page.add_widget(popup_button("Управление проектами", self.open_project_workspace))
+
+    def open_mobile_knowledge(self):
+        page = self._mobile_section("more", "Память и знания", self.open_mobile_more)
+        page.add_widget(self._mobile_heading("Сохранённые факты"))
+        for fact in db_memory_items(8):
+            page.add_widget(self._mobile_card(fact["label"], "studio", self.open_memory_manager, fact["value"][:100]))
+        page.add_widget(popup_button("Управлять памятью", self.open_memory_manager))
+        page.add_widget(self._mobile_heading("База знаний"))
+        for document in db_knowledge_items(8):
+            page.add_widget(self._mobile_card(document["title"], "chat", self.open_knowledge_base,
+                                             str(len(document["content"])) + " символов"))
+        page.add_widget(popup_button("+ Добавить документ", self.open_knowledge_base, "accent"))
+
+    def open_mobile_settings(self):
+        page = self._mobile_section("more", "Настройки", self.open_mobile_more)
+        page.add_widget(self._mobile_heading("Внешний вид"))
+        themes = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+        for key, label in (("aurora", "Тема Aish"), ("daylight", "Светлая")):
+            themes.add_widget(popup_button(label, lambda value=key: self._mobile_theme(value),
+                                           "accent" if STATE["theme"] == key else "default"))
+        page.add_widget(themes)
+        page.add_widget(self._mobile_heading("Ответы"))
+        stream = BoxLayout(size_hint_y=None, height=dp(52), padding=(dp(10), dp(8)), spacing=dp(5))
+        surface(stream, T("panel2"), T("panel3"))
+        stream.add_widget(make_label("Потоковый вывод", 14, bold=True))
+        slider = PremiumSwitch(active=bool(STATE["streaming"]))
+
+        def set_streaming(enabled):
+            STATE["streaming"] = bool(enabled)
+            save_settings()
+
+        slider.on_change = set_streaming
+        stream.add_widget(slider)
+        page.add_widget(stream)
+        self._mobile_links(page, (
+            ("Модель ИИ", self._model_label(), "studio", self.open_model_picker),
+            ("Данные", "Резервная копия и диагностика", "more", self.open_mobile_data),
+            ("Все настройки", "Темы, память, голос и поведение чата", "tools", self.open_settings),
+        ))
+
+    def _mobile_theme(self, name):
+        if self.busy:
+            self.toast("Заверши генерацию перед сменой темы")
+            return
+        if STATE["theme"] != name:
+            STATE["theme"] = name
+            save_settings()
+            app = App.get_running_app()
+            if app:
+                app.rebuild_ui()
+
+    def open_mobile_data(self):
+        page = self._mobile_section("more", "Данные и приватность", self.open_mobile_more)
+        self._mobile_links(page, (
+            ("Маскировка данных", "Скрой контакты и распространённые секреты", "tools", self.open_privacy_tool),
+            ("Экспорт чата", "Сохрани переписку в файл", "chat", self.open_chat_export),
+            ("Импорт памяти", "Загрузи ранее сохранённые факты", "history", self.open_memory_import),
+            ("Резервная копия", "Чаты и настройки в JSON", "more", self.export_backup_json),
+            ("Сводка хранилища", "Локальные данные приложения", "more",
+             lambda: self.show_diagnostic_report(self.get_storage_summary())),
+            ("Диагностика API", "Проверка доступности сервисов", "tools", self.run_diagnostics),
+        ))
+
+    def open_composer_actions(self):
+        popup, _, listing = self._workspace_list("Добавить к сообщению")
+        for title, action in (
+            ("Шаблон запроса", self.open_prompt_library),
+            ("Символы", self.open_emoji_picker),
+            ("Документ в базу знаний", self.open_knowledge_base),
+            ("Создать изображение", lambda: self._mobile_draft("Нарисуй ")),
+        ):
+            listing.add_widget(popup_button(title, lambda callback=action: (popup.dismiss(), callback())))
+        popup.open()
+
+    @staticmethod
+    def _model_label():
+        preferred = STATE.get("provider_preference", "auto")
+        labels = {"auto": "Qwen", "Qwen3.8 Flash": "Qwen Flash", "Llama 3.2 3B": "Llama 3.2", YANDEX_NAME: "YandexGPT"}
+        return labels.get(preferred, preferred)
+
+    def open_model_picker(self):
+        if self.busy:
+            self.toast("Сначала останови генерацию")
+            return
+        popup, _, listing = self._workspace_list("Модель ИИ")
+        current = STATE.get("provider_preference", "auto")
+
+        def select(model):
+            STATE.update(provider_preference=model, last_provider="-", last_model="-")
+            self.model_button.text = self._model_label()
+            self._update_status()
+            save_settings()
+            popup.dismiss()
+
+        listing.add_widget(popup_button("Авто · Qwen и резерв", lambda: select("auto"),
+                                        "accent" if current == "auto" else "default"))
+        listing.add_widget(self._mobile_heading("Бесплатно · AI Horde"))
+        for name, _model in HORDE_MODELS:
+            listing.add_widget(popup_button(name, lambda choice=name: select(choice),
+                                            "accent" if current == name else "default"))
+        listing.add_widget(self._mobile_heading("С личным ключом"))
+        listing.add_widget(popup_button(YANDEX_NAME + " · Яндекс AI Studio",
+                                        lambda: (popup.dismiss(), self._configure_yandex())))
+        for entry in [p["name"] for p in PROVIDERS[len(HORDE_MODELS):]] + (["Pollinations"] if IMAGE_API_KEY else []):
+            listing.add_widget(popup_button(entry, lambda choice=entry: select(choice),
+                                            "accent" if current == entry else "default"))
+        listing.add_widget(make_label("У бесплатных моделей AI Horde общая очередь. При нагрузке возможны задержки.",
+                                      12, "text_dim", size_hint_y=None, height=dp(55)))
+        popup.open()
+
+    def _configure_yandex(self):
+        popup, _, listing = self._workspace_list("Яндекс AI Studio")
+        folder = self._mobile_field("Идентификатор каталога", text=YANDEX_CONFIG[0])
+        key = self._mobile_field("API-ключ", text=YANDEX_CONFIG[1], password=True)
+        listing.add_widget(make_label("YandexGPT Pro 5.1 использует тариф твоего аккаунта. Ключ хранится в памяти до закрытия приложения.",
+                                      12, "text_dim", size_hint_y=None, height=dp(62)))
+        listing.add_widget(folder)
+        listing.add_widget(key)
+
+        def apply():
+            global YANDEX_CONFIG
+            folder_id, api_key = folder.text.strip(), key.text.strip()
+            if not re.fullmatch(r"[a-zA-Z0-9_-]{3,80}", folder_id) or not api_key or any(c.isspace() for c in api_key):
+                self.toast("Проверь идентификатор каталога и API-ключ")
+                return
+            YANDEX_CONFIG = (folder_id, api_key)
+            STATE.update(provider_preference=YANDEX_NAME, last_provider="-", last_model="-")
+            self.model_button.text = self._model_label()
+            self._update_status()
+            save_settings()
+            popup.dismiss()
+
+        listing.add_widget(popup_button("Использовать YandexGPT", apply, "accent"))
+        popup.open()
+
 
     def _sync_composer_skin(self, *_):
         try:
@@ -3950,6 +4562,8 @@ class ChatRoot(BoxLayout):
 
     def _input_focus_changed(self, _widget, focused):
         """Make the composer visibly active and keep the chat aligned while typing."""
+        if focused and self.mobile_screens.current != "chat":
+            self.show_mobile_chat()
         try:
             ac = T("accent")
             self.input_border_color.rgba = (ac[0], ac[1], ac[2], 0.84 if focused else 0.20)
@@ -4179,7 +4793,7 @@ class ChatRoot(BoxLayout):
             dp(4 if self._keyboard_visible else (6 if landscape else 7)),
         )
         self.bottom_bar.height = composer_h + (chips_h if visible else 0)
-        self.navigation.height = 0 if self._keyboard_visible else dp(54)
+        self.navigation.height = 0 if self._keyboard_visible else dp(62)
         self.navigation.opacity = 0 if self._keyboard_visible else 1
         self.navigation.disabled = self._keyboard_visible
 
@@ -4338,6 +4952,7 @@ class ChatRoot(BoxLayout):
             self.input.text = self._draft_saved
 
     def load_chat(self):
+        self.show_mobile_chat()
         self._restore_draft()
         self.title_lbl.text = db_session_title()
         self.messages_box.clear_widgets()
@@ -4347,8 +4962,9 @@ class ChatRoot(BoxLayout):
         records = db_messages(sid=SESSION_ID)
         self._welcome_panel = None
         if not records:
+            self.title_lbl.text = "Aish"
             self._set_chips_visible(False)
-            self._welcome_panel = WelcomePanel(self)
+            self._welcome_panel = self._mobile_welcome() if STATE["theme"] == "aurora" else WelcomePanel(self)
             self.messages_box.add_widget(self._welcome_panel)
         else:
             self._set_chips_visible(False)
@@ -4379,6 +4995,7 @@ class ChatRoot(BoxLayout):
                     interrupted=False, image_path="", animate=True):
         welcome = getattr(self, "_welcome_panel", None)
         if welcome is not None:
+            self.title_lbl.text = "Чат"
             try:
                 self.messages_box.remove_widget(welcome)
             except Exception:
@@ -4391,6 +5008,8 @@ class ChatRoot(BoxLayout):
                                on_action=self.open_message_actions,
                                on_long=self.open_quick_actions,
                                on_image=self.show_image)
+        if STATE["theme"] == "aurora" and role == "ai" and msg_id:
+            self._add_mobile_reply_actions(bubble)
         if animate:
             bubble.opacity = 0
         self.messages_box.add_widget(bubble)
@@ -4412,7 +5031,7 @@ class ChatRoot(BoxLayout):
         else:
             info = "готов к работе"
         self.status_lbl.text = info
-        self.status_lbl.color = T("online")
+        self.status_lbl.color = T("text_dim")
 
     def _set_busy(self, value, status=None):
         self.busy = value
@@ -4720,6 +5339,9 @@ class ChatRoot(BoxLayout):
             self.add_message("ai", "Ошибка сохранения истории: " + str(exc)[:120])
             return
         self.add_message("me", text, msg_id=user_id)
+        self._request_ai(sid)
+
+    def _request_ai(self, sid):
         self._set_chips_visible(False)
         self.title_lbl.text = db_session_title()
         self.request_id = uuid.uuid4().hex
@@ -4838,6 +5460,8 @@ class ChatRoot(BoxLayout):
             if bubble is not None:
                 bubble.set_text(reply)
                 bubble.msg_id = reply_id
+                if reply_id and STATE["theme"] == "aurora":
+                    self._add_mobile_reply_actions(bubble)
             else:
                 new_bubble = self.add_message("ai", "", msg_id=reply_id)
                 new_bubble.reveal_text(reply)
@@ -4918,7 +5542,64 @@ class ChatRoot(BoxLayout):
             return
         self.send()
 
+    def _voice_intent(self):
+        """Use Android's installed speech recognizer in a packaged APK."""
+        self.status_lbl.text = "Открываю голосовой ввод…"
+        try:
+            from android import activity
+            from android.runnable import run_on_ui_thread
+            from jnius import autoclass
+            Intent = autoclass("android.content.Intent")
+            Recognizer = autoclass("android.speech.RecognizerIntent")
+            native = autoclass("org.renpy.android.PythonActivity").mActivity
+            request_code = 7145
+
+            if getattr(self, "_voice_callback", None):
+                return
+
+            def finish(request, result, data):
+                if request != request_code:
+                    return
+                activity.unbind(on_activity_result=finish)
+                self._voice_callback = None
+                matches = data.getStringArrayListExtra(Recognizer.EXTRA_RESULTS) if result == -1 and data else None
+                value = str(matches.get(0)) if matches is not None and matches.size() else ""
+
+                def insert(_dt):
+                    self._update_status()
+                    if value and not self.busy:
+                        self._mobile_draft(value)
+                Clock.schedule_once(insert, 0)
+
+            @run_on_ui_thread
+            def launch():
+                try:
+                    intent = Intent(Recognizer.ACTION_RECOGNIZE_SPEECH)
+                    intent.putExtra(Recognizer.EXTRA_LANGUAGE_MODEL, Recognizer.LANGUAGE_MODEL_FREE_FORM)
+                    intent.putExtra(Recognizer.EXTRA_LANGUAGE, "ru-RU")
+                    native.startActivityForResult(intent, request_code)
+                except Exception:
+                    activity.unbind(on_activity_result=finish)
+                    self._voice_callback = None
+                    Clock.schedule_once(lambda *_: self._report_voice_unavailable(), 0)
+
+            activity.bind(on_activity_result=finish)
+            self._voice_callback = finish
+            launch()
+        except Exception:
+            self._report_voice_unavailable()
+
+    def _report_voice_unavailable(self):
+        self._update_status()
+        self.toast("На устройстве недоступно распознавание речи")
+
     def voice_click(self):
+        if self.busy:
+            self.toast("Заверши текущую генерацию")
+            return
+        if not ANDROID and kivy_platform == "android":
+            self._voice_intent()
+            return
         if not ANDROID:
             self.toast("Голосовой ввод недоступен в этой среде")
             return
@@ -5079,13 +5760,11 @@ class ChatRoot(BoxLayout):
             if popup:
                 popup.dismiss()
             return
-        prompt = user_row["content"]
-        db_trim_from(SESSION_ID, user_row["id"])
-        if popup:
-            popup.dismiss()
-        self.load_chat()
-        self.input.text = prompt
-        self.send()
+        copied = db_duplicate_chat(SESSION_ID, through_id=user_row["id"])
+        if copied:
+            self.open_chat_by_id(copied, popup)
+            self.toast("Новый вариант будет в копии диалога")
+            self._request_ai(copied)
 
     def copy_text(self, text):
         try:
@@ -6208,37 +6887,65 @@ class ChatRoot(BoxLayout):
             ("Подготовить собеседование", "Вопросы, оценка и тренировочные ответы", "star",
              "Подготовь меня к собеседованию на позицию [роль], уровень [уровень]. Дай темы по приоритету, задай вопросы по одному, оценивай ответы по понятным критериям и объясняй, как улучшить ответ."),
         ]
-        popup = RoundedPopup(size_hint=(0.95, 0.92))
-        popup.container.add_widget(make_label("БИБЛИОТЕКА ПРОМПТОВ", 16, "text", True,
-                                              size_hint=(1, None), height=dp(30)))
-        popup.container.add_widget(make_label("Выбери сценарий — шаблон попадёт в строку ввода, и ты сможешь отредактировать его перед отправкой.",
-                                              8.7, "text_dim", size_hint=(1, None), height=dp(32), valign="top"))
-        search = TextInput(hint_text="Поиск шаблона…", multiline=False, size_hint=(1, None), height=dp(42),
-                           font_size=sp(12), foreground_color=T("text"), hint_text_color=T("text_dim"),
-                           cursor_color=T("accent"), background_normal="", background_active="",
-                           background_color=T("panel2"), padding=(dp(10), dp(9)))
-        popup.container.add_widget(search)
-        scroll = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"])
-        listing = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(7), padding=(dp(1), dp(3), dp(1), dp(7)))
-        listing.bind(minimum_height=listing.setter("height")); scroll.add_widget(listing)
-        popup.container.add_widget(scroll)
-        def render(filter_text=""):
+        page = self._mobile_section("studio", "Библиотека запросов", self.open_mobile_studio)
+        search = self._mobile_field("Найти шаблон")
+        page.add_widget(search)
+        filters = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(5))
+        page.add_widget(filters)
+        category = "Все"
+        try:
+            favorite_titles = set(json.loads(_meta_get("favorite_prompts", "[]")))
+        except (TypeError, ValueError):
+            favorite_titles = set()
+        listing = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(8))
+        listing.bind(minimum_height=listing.setter("height"))
+        page.add_widget(listing)
+        categories = {"Текст": {"text", "notes", "chat", "file"}, "Код": {"code"}, "Учёба": {"ai", "history", "star"}}
+        buttons = {}
+
+        def choose(name):
+            nonlocal category
+            category = name
+            render()
+
+        def toggle(title):
+            if title in favorite_titles:
+                favorite_titles.remove(title)
+            else:
+                favorite_titles.add(title)
+            _meta_set("favorite_prompts", json.dumps(sorted(favorite_titles), ensure_ascii=False))
+            render()
+
+        def render(*_):
             listing.clear_widgets()
-            term = filter_text.strip().lower()
-            found = 0
+            for name, button in buttons.items():
+                button.disabled = name == category
+            needle = search.text.strip().casefold()
             for title, description, glyph, prompt in prompts:
-                if term and term not in title.lower() and term not in description.lower() and term not in prompt.lower():
+                if needle and needle not in (title + " " + description + " " + prompt).casefold():
                     continue
-                found += 1
-                listing.add_widget(PromptTile(title, description, glyph,
-                    callback=lambda value=prompt: self._insert_tool_prompt(value, popup)))
-            if not found:
-                listing.add_widget(make_label("Ничего не найдено", 12, "text_dim",
-                                              size_hint=(1, None), height=dp(40)))
-        search.bind(text=lambda _w, value: render(value))
+                if category == "★" and title not in favorite_titles:
+                    continue
+                if category in categories and glyph not in categories[category]:
+                    continue
+                row = BoxLayout(size_hint_y=None, height=dp(66), spacing=dp(6))
+                card = self._mobile_card(title, "studio", lambda value=prompt: self._mobile_draft(value), description)
+                card.size_hint_y = 1
+                row.add_widget(card)
+                favorite = popup_button("★" if title in favorite_titles else "☆",
+                                        lambda value=title: toggle(value), height=dp(66))
+                favorite.size_hint_x = None
+                favorite.width = dp(44)
+                row.add_widget(favorite)
+                listing.add_widget(row)
+            if not listing.children:
+                listing.add_widget(self._mobile_heading("Шаблоны не найдены"))
+
+        for name in ("Все", "Текст", "Код", "Учёба", "★"):
+            buttons[name] = popup_button(name, lambda value=name: choose(value), height=dp(42))
+            filters.add_widget(buttons[name])
         render()
-        popup.container.add_widget(popup_button("Закрыть библиотеку", popup.dismiss, "default", dp(42)))
-        popup.open()
+        search.bind(text=render)
 
     def open_focus_timer(self, *_args):
         """Simple focus timer with work/break presets and a safe cancellable Clock event."""
@@ -6968,10 +7675,7 @@ class ChatRoot(BoxLayout):
 
         # AI tuning
         card = section("ИНТЕЛЛЕКТ И ОТВЕТЫ", "Выбери предпочтительный маршрут; резервные сервисы могут помочь при сбоях")
-        provider_choices = [("auto", "Авто"), ("KeylessAI", "Keyless"), ("Kilo", "Kilo"), ("LLM7", "LLM7")]
-        if IMAGE_API_KEY:
-            provider_choices.append(("Pollinations", "Pollin."))
-        selector(card, "Предпочтительный провайдер", "provider_preference", provider_choices)
+        card.add_widget(popup_button("Модель: " + self._model_label(), self.open_model_picker))
         toggle(card, "Автоматический резерв", "fallback_enabled", "Переходить к другому сервису при ошибке")
         toggle(card, "Потоковая выдача", "streaming", "Показывать ответ по мере генерации, если API поддерживает")
         selector(card, "Стиль ответа", "creativity", [("precise", "Точно"), ("balanced", "Баланс"), ("creative", "Креатив")])
@@ -7270,7 +7974,8 @@ class ChatRoot(BoxLayout):
         copied = db_duplicate_chat(sid, through_id)
         if copied:
             for popup in popups:
-                popup.dismiss()
+                if popup is not None:
+                    popup.dismiss()
             self.open_chat_by_id(copied)
             self.toast("Создана копия чата")
 
@@ -7456,8 +8161,10 @@ class ChatApp(App):
     def build(self):
         self.title = "Aish"
         Window.clearcolor = T("bg_top")
+        host = BoxLayout(orientation="vertical")
         self.root_widget = ChatRoot()
-        return self.root_widget
+        host.add_widget(self.root_widget)
+        return host
 
     def on_start(self):
         """Enable tablet rotation where appropriate and check Releases off the UI thread."""
@@ -7652,7 +8359,7 @@ class ChatApp(App):
             old.dispose()
         except Exception:
             pass
-        self.root.clear_widgets()
+        self.root.remove_widget(old)
         self.root_widget = ChatRoot()
         self.root.add_widget(self.root_widget)
         Window.clearcolor = T("bg_top")
