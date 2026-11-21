@@ -37,7 +37,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "42"
+APP_VERSION = "43"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -2223,7 +2223,10 @@ def _read_json_response(url, payload, headers, timeout=45):
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=SSL_CONTEXT) as response:
-            raw = response.read().decode("utf-8", "replace")
+            raw = response.read(2 * 1024 * 1024 + 1)
+            if len(raw) > 2 * 1024 * 1024:
+                return None, "ответ API слишком большой"
+            raw = raw.decode("utf-8", "replace")
         return raw, None
     except urllib.error.HTTPError as exc:
         try: detail = exc.read().decode("utf-8", "replace")[:180]
@@ -2242,10 +2245,38 @@ def _read_json_response(url, payload, headers, timeout=45):
         return None, f"{type(exc).__name__}: {str(exc)[:100]}"
 
 
+def _completion_text(data):
+    if not isinstance(data, dict):
+        return ""
+    choices = data.get("choices")
+    choice = choices[0] if isinstance(choices, list) and choices else {}
+    if isinstance(choice, dict):
+        for key in ("delta", "message"):
+            message = choice.get(key)
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content:
+                return content
+            if isinstance(content, list):
+                return "".join(part["text"] for part in content
+                               if isinstance(part, dict) and isinstance(part.get("text"), str))
+    content = data.get("content")
+    return content if isinstance(content, str) else ""
+
+
 def _stream_request(req, on_chunk=None, cancel_event=None):
     chunks = []
     try:
         with urllib.request.urlopen(req, timeout=45, context=SSL_CONTEXT) as response:
+            if response.headers.get_content_type() == "application/json":
+                raw = response.read(2 * 1024 * 1024 + 1)
+                if len(raw) > 2 * 1024 * 1024:
+                    return None, "ответ API слишком большой"
+                if cancel_event and cancel_event.is_set():
+                    return None, "остановлено"
+                text = _completion_text(json.loads(raw)).strip()
+                return (text, None) if text else (None, "пустой JSON-ответ")
             while not (cancel_event and cancel_event.is_set()):
                 line = response.readline()
                 if not line:
@@ -2260,16 +2291,7 @@ def _stream_request(req, on_chunk=None, cancel_event=None):
                     data = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
-                piece = ""
-                try:
-                    choice = data["choices"][0]
-                    piece = choice.get("delta", {}).get("content", "")
-                    if not piece:
-                        piece = choice.get("message", {}).get("content", "")
-                    if isinstance(piece, list):
-                        piece = "".join(str(x.get("text", "")) for x in piece if isinstance(x, dict))
-                except Exception:
-                    piece = ""
+                piece = _completion_text(data)
                 if piece:
                     piece = str(piece)
                     chunks.append(piece)
@@ -2331,12 +2353,7 @@ def try_provider(provider, messages, on_chunk=None, cancel_event=None):
             data = None
         text = None
         if isinstance(data, dict):
-            try:
-                text = data["choices"][0]["message"].get("content")
-            except Exception:
-                pass
-            if not text and isinstance(data.get("content"), str):
-                text = data["content"]
+            text = _completion_text(data)
             if not text and data.get("error"):
                 return None, "API: " + str(data["error"])[:120]
         elif raw and raw.strip():
