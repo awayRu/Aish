@@ -18,6 +18,7 @@ import hashlib
 import platform
 import mimetypes
 import shutil
+import subprocess
 import webbrowser
 import ssl
 import socket
@@ -42,7 +43,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "50"
+APP_VERSION = "51"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -92,7 +93,8 @@ from kivy.uix.screenmanager import NoTransition, Screen, ScreenManager
 from kivy.utils import platform as kivy_platform
 
 from aish_mobile import (ASSETS, UI_FONT, IconAction, CardButton, ComposerInput, GlassArtwork,
-                         Glyph, NavButton, PALETTE, ProgressDial, hairline, panel, surface)
+                         Glyph, NavButton, PALETTE, ProgressDial, hairline, jade_waves, panel,
+                         set_effects, surface)
 from aish_media import (ImageServiceUnavailable, OVH_API, PHOTO_SUFFIXES, create_horde_picture,
                         create_picture, prepare_photo, store_photo, vision_content)
 from aish_storage import data_directory
@@ -275,7 +277,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__)) or "."
 DATA_DIR = data_directory(ROOT, override=os.environ.get("AISH_DATA_DIR"))
 DB_FILE = os.path.join(DATA_DIR, "chat.db")
 IMG_DIR = os.path.join(DATA_DIR, "images")
-GLASS_ASSET = ASSETS / "aish-glass-reference.png"
+GLASS_ASSET = ASSETS / "aish-premium-symbol.png"
 os.makedirs(IMG_DIR, exist_ok=True)
 UA = "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile"
 
@@ -1817,16 +1819,36 @@ def voice_input():
 
 
 def voice_output(text):
-    if not ANDROID:
-        return
     value = str(text)[:2500]
+    if kivy_platform == "win":
+        script = ('$text = [Console]::In.ReadToEnd(); '
+                  '$voice = New-Object -ComObject SAPI.SpVoice; '
+                  '[void]$voice.Speak($text)')
+        try:
+            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                            "[Console]::InputEncoding = [Text.Encoding]::UTF8; " + script],
+                           input=value.encode("utf-8"), stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW,
+                           timeout=90, check=True)
+            return True
+        except (OSError, subprocess.SubprocessError):
+            return False
+    if not ANDROID:
+        try:
+            from plyer import tts
+            tts.speak(value)
+            return True
+        except (ImportError, NotImplementedError, RuntimeError):
+            return False
     try:
         ANDROID.speak(value)
+        return True
     except Exception:
         try:
             ANDROID.ttsSpeak(value)
+            return True
         except Exception:
-            pass
+            return False
 
 # ---------------------------------------------------------------------------
 # SQLite persistence; all access to this shared connection is locked.
@@ -2073,7 +2095,10 @@ def db_clear(sid=None):
 
 def db_sessions(archived=None):
     with DB_LOCK:
-        query = "SELECT id,title,created,updated,pinned,archived,draft != '' AS has_draft FROM sessions"
+        query = """SELECT id,title,created,updated,pinned,archived,draft != '' AS has_draft,
+                   COALESCE((SELECT substr(content, 1, 200) FROM messages
+                             WHERE session_id=sessions.id ORDER BY id DESC LIMIT 1), '') AS preview
+                   FROM sessions"""
         query += " ORDER BY pinned DESC, updated DESC, rowid DESC"
         rows = DB.execute(query).fetchall()
         return [dict(row) for row in rows if archived is None or row["archived"] == archived]
@@ -2423,6 +2448,10 @@ def _completion_text(data):
 
 def _stream_request(req, on_chunk=None, cancel_event=None):
     chunks = []
+    def failed(message):
+        # Do not switch providers after rendering output from the first one.
+        return ("".join(chunks).strip() or None), message
+
     try:
         with _model_response(req, 45) as response:
             if response.headers.get_content_type() == "application/json":
@@ -2457,26 +2486,15 @@ def _stream_request(req, on_chunk=None, cancel_event=None):
     except urllib.error.HTTPError as exc:
         try: detail = exc.read(512).decode("utf-8", "replace")[:160]
         except Exception: detail = ""
-        # Don't retry via another provider after partial text has been shown.
-        if chunks:
-            return "".join(chunks).strip(), None
-        return None, f"HTTP {exc.code}: {detail}"
+        return failed(f"HTTP {exc.code}: {detail}")
     except urllib.error.URLError as exc:
-        if chunks:
-            return "".join(chunks).strip(), None
-        return None, f"сеть: {str(getattr(exc, 'reason', exc))[:90]}"
+        return failed(f"сеть: {str(getattr(exc, 'reason', exc))[:90]}")
     except (socket.timeout, TimeoutError):
-        if chunks:
-            return "".join(chunks).strip(), None
-        return None, "таймаут потока"
+        return failed("таймаут потока")
     except ssl.SSLError as exc:
-        if chunks:
-            return "".join(chunks).strip(), None
-        return None, f"ошибка TLS: {str(exc)[:90]}"
+        return failed(f"ошибка TLS: {str(exc)[:90]}")
     except Exception as exc:
-        if chunks:
-            return "".join(chunks).strip(), None
-        return None, f"{type(exc).__name__}: {str(exc)[:90]}"
+        return failed(f"{type(exc).__name__}: {str(exc)[:90]}")
     text = "".join(chunks).strip()
     if cancel_event and cancel_event.is_set():
         return text or None, None if text else "остановлено"
@@ -2522,7 +2540,7 @@ def try_provider(provider, messages, on_chunk=None, cancel_event=None):
     if text:
         STATE["last_provider"] = provider["name"]
         STATE["last_model"] = provider["model"]
-        return text, None
+        return text, error
     return None, error or "пустой ответ"
 
 
@@ -2603,7 +2621,7 @@ def ask_ai(messages, on_chunk=None, cancel_event=None, providers=None):
             return None, "остановлено"
         text, error = try_provider(provider, messages, on_chunk=on_chunk, cancel_event=cancel_event)
         if text:
-            return text, None
+            return text, friendly_api_error(error) if error else None
         errors.append(f"{provider['name']}: {friendly_api_error(error)}")
     return None, "\n".join(errors[-3:])
 
@@ -3435,7 +3453,11 @@ class MessageBubble(BoxLayout):
                 footer.add_widget(time_label)
             self.bubble.add_widget(footer)
 
-        self.add_widget(self.bubble)
+        self.bubble_stack = BoxLayout(orientation="vertical", size_hint=(None, None), spacing=dp(5))
+        self.bubble_stack.bind(minimum_height=self.bubble_stack.setter("height"), height=self._update_height)
+        self.bubble.bind(width=self.bubble_stack.setter("width"))
+        self.bubble_stack.add_widget(self.bubble)
+        self.add_widget(self.bubble_stack)
 
         if is_me and show_avatars and not self._eclipse:
             self.add_widget(Avatar("Я", T("avatar_me"), size_px=dp(31)))
@@ -3445,7 +3467,6 @@ class MessageBubble(BoxLayout):
             self.add_widget(Widget(size_hint_x=1))
 
         self.bind(width=self._layout_width)
-        self.bubble.bind(height=self._update_height)
         Clock.schedule_once(self._layout_width, 0)
         Clock.schedule_once(lambda *_: self._update_height(), 0)
 
@@ -3483,8 +3504,11 @@ class MessageBubble(BoxLayout):
         self._update_height()
 
     def _update_height(self, *_):
-        if hasattr(self, "bubble"):
-            self.height = self.bubble.height + dp(6)
+        if hasattr(self, "bubble_stack"):
+            self.height = self.bubble_stack.height + dp(6)
+
+    def add_reply_actions(self, actions):
+        self.bubble_stack.add_widget(actions)
 
     def set_text(self, text, force_update=True):
         self.text = text or ""
@@ -3700,6 +3724,8 @@ class ChatRoot(BoxLayout):
         self.add_widget(self.keyboard_spacer)
         Clock.schedule_once(self._sync_background, 0)
         Window.bind(size=self._adapt_orientation, on_drop_file=self._on_file_dropped)
+        if kivy_platform == "win":
+            Window.bind(on_key_down=self._desktop_commands)
         Clock.schedule_once(lambda *_: self._install_android_keyboard_listener(), 0.7)
         self._initial_load_event = Clock.schedule_once(self._safe_initial_load, 0)
 
@@ -3727,6 +3753,8 @@ class ChatRoot(BoxLayout):
         self._flush_draft()
         self._dismiss_toast()
         self._photo_load_token = None
+        if kivy_platform == "win":
+            Window.unbind(on_key_down=self._desktop_commands)
         if self._welcome_art:
             self._welcome_art.set_motion(False)
         for attr in ("_voice_callback", "_photo_callback"):
@@ -3764,6 +3792,7 @@ class ChatRoot(BoxLayout):
             self._keyboard_listener = None
 
     def _build_ui(self):
+        set_effects(self._effects_level())
         # A single base surface avoids hard horizontal colour bands on tall phones.
         with self.canvas.before:
             # A subtle 30-band gradient replaces the flat purple field on tall screens.
@@ -3813,6 +3842,12 @@ class ChatRoot(BoxLayout):
             accent3 = TV("glow3") or (0.18, 0.82, 1.0)
             Color(accent3[0], accent3[1], accent3[2], 0.0)
             self.bg_halo_2 = Line(ellipse=(self.x+self.width*0.32, self.top-dp(405), self.width*0.55, dp(220)), width=dp(0.55))
+            self._jade_ribbons = []
+            if STATE["theme"] == "aurora":
+                for alpha in (.40, .68):
+                    ink = Color(1, 1, 1, alpha)
+                    ribbon = Rectangle(texture=jade_waves())
+                    self._jade_ribbons.append((ink, ribbon))
             # Fine, low-alpha particle trails: decorative without overpowering chat content.
             self._spark_particles = []
             particle_count = 0 if STATE.get("performance_mode", True) else 6
@@ -3842,16 +3877,18 @@ class ChatRoot(BoxLayout):
         self.chat_screen.add_widget(self.chat_layout)
         self.mobile_screens.add_widget(self.chat_screen)
         self.mobile_screens.add_widget(self.section_screen)
-        self.add_widget(self.mobile_screens)
+        self.workspace = BoxLayout(orientation="horizontal")
+        self.workspace.add_widget(self.mobile_screens)
+        self.add_widget(self.workspace)
 
         header = BoxLayout(size_hint_y=None, height=dp(66),
                            padding=(dp(17), dp(8), dp(22), dp(8)), spacing=dp(7))
         self.header_widget = header
-        hairline(header, T("panel3"), top=False)
-        header.add_widget(IconAction("", "menu", self.open_menu, self._nav_color, button_width=33,
-                                     size_hint=(None, 1), icon_size=19))
+        self.menu_button = IconAction("", "tools", self._open_chat_header, self._nav_color, button_width=39,
+                                     size_hint=(None, 1), icon_size=21, variant="outline")
+        header.add_widget(self.menu_button)
         self.header_titles = BoxLayout(orientation="vertical")
-        self.title_lbl = make_label("Новый чат", 15, bold=True, shorten=True, shorten_from="right")
+        self.title_lbl = make_label("Aish", 20, bold=True, halign="center", shorten=True, shorten_from="right")
         self.status_lbl = make_label("", 10.5, "text_dim", shorten=True, size_hint_y=None, height=0)
         self.header_titles.add_widget(self.title_lbl)
         self.header_titles.add_widget(self.status_lbl)
@@ -3935,19 +3972,23 @@ class ChatRoot(BoxLayout):
         self.chat_layout.add_widget(self.bottom_bar)
         self.navigation = BoxLayout(size_hint_y=None, height=dp(70),
                                     padding=(dp(9), dp(3), dp(9), dp(3)), spacing=dp(2))
-        surface(self.navigation, T("bg_bot"), radius=0)
-        hairline(self.navigation, T("panel3"))
+        surface(self.navigation, T("bg_bot"), T("panel3"), radius=20)
         self.mobile_tabs = {}
         for key, label, icon, action in (
-            ("chat", "Чат", "chat", self.show_mobile_chat),
-            ("history", "Диалоги", "history", self.open_mobile_history),
-            ("studio", "Студия", "studio", self.open_mobile_studio),
-            ("more", "Ещё", "tools", self.open_mobile_more),
+            ("chat", "Главная", "home", self.show_mobile_chat),
+            ("history", "Чаты", "chat", self.open_mobile_history),
+            ("studio", "Создать", "studio", self.open_mobile_studio),
+            ("photo", "Фото", "image", self.open_photo_tools),
+            ("more", "Профиль", "profile", self.open_mobile_more),
         ):
             tab = NavButton(label, icon, action, self._nav_color)
             self.mobile_tabs[key] = tab
             self.navigation.add_widget(tab)
         self.add_widget(self.navigation)
+        self.desktop_sidebar = None
+        if kivy_platform == "win":
+            self._build_desktop_sidebar()
+            self.bind(width=self._adapt_orientation)
         self.input.bind(focus=self._input_focus_changed, text=self._composer_text_changed)
         self.input.bind(minimum_height=self._refresh_bottom_layout)
         self.scroll.bind(height=self._resize_welcome)
@@ -3961,6 +4002,58 @@ class ChatRoot(BoxLayout):
         measure = TextMeasure(font_name=UI_FONT, font_size=sp(12.5), bold=True)
         model_width, _ = measure.get_extents(self.model_button.text)
         model_slot.width = min(dp(173), max(dp(106), model_width + dp(61)))
+
+    def _build_desktop_sidebar(self):
+        sidebar = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(258),
+                            padding=(dp(13), dp(14)), spacing=dp(9))
+        surface(sidebar, T("panel"), T("panel3"), radius=18)
+        sidebar.add_widget(make_label("Чаты", 20, bold=True, size_hint_y=None, height=dp(37)))
+        sidebar.add_widget(popup_button("+ Новый чат", self.new_chat, "accent", dp(43)))
+        sidebar.add_widget(popup_button("Поиск и архив", self.open_mobile_history, height=dp(39)))
+        scroller = ScrollView(do_scroll_x=False, bar_width=dp(3))
+        self.desktop_history = BoxLayout(orientation="vertical", spacing=dp(6), size_hint_y=None)
+        self.desktop_history.bind(minimum_height=self.desktop_history.setter("height"))
+        scroller.add_widget(self.desktop_history)
+        sidebar.add_widget(scroller)
+        sidebar.add_widget(popup_button("Настройки", self.open_mobile_settings, height=dp(40)))
+        self.desktop_sidebar = sidebar
+
+    def _refresh_desktop_history(self):
+        if not self.desktop_sidebar:
+            return
+        self.desktop_history.clear_widgets()
+        for entry in db_sessions(False)[:40]:
+            sid = entry["id"]
+            row = self._mobile_card(entry["title"], "chat", lambda chat=sid: self.open_chat_by_id(chat),
+                                    selected=(sid == SESSION_ID))
+            row.height = dp(47)
+            self.desktop_history.add_widget(row)
+
+    def _set_wave_context(self):
+        if not self._jade_ribbons:
+            return
+        chat_visible = self.mobile_screens.current == "chat"
+        primary, footer = self._jade_ribbons
+        primary[0].a = .78 if chat_visible and self._welcome_panel is not None else .16
+        footer[0].a = .72 if getattr(self, "_section_title", "") == "Настройки" and not chat_visible else .25
+
+    def _open_chat_header(self):
+        if self._welcome_panel is not None:
+            self.open_menu()
+        else:
+            self.open_mobile_history()
+
+    def _desktop_commands(self, _window, key, _scancode, codepoint, modifiers):
+        if key == 292:
+            Window.fullscreen = not Window.fullscreen
+            return True
+        if "ctrl" in modifiers:
+            shortcut = (codepoint or chr(key) if 0 <= key < 128 else "").lower()
+            action = {"n": self.new_chat, "k": self.open_mobile_history}.get(shortcut)
+            if action is not None:
+                action()
+                return True
+        return False
 
     @staticmethod
     def _nav_color(key):
@@ -3977,52 +4070,92 @@ class ChatRoot(BoxLayout):
     def show_mobile_chat(self):
         self.mobile_screens.current = "chat"
         self._activate_mobile_tab("chat")
+        self._set_wave_context()
         if self._welcome_art:
             self._welcome_art.set_motion(self._motion_enabled())
 
     @staticmethod
-    def _motion_enabled():
-        return bool(STATE.get("message_animations", True) and STATE.get("sparkle_background", True))
+    def _effects_level():
+        if not STATE.get("message_animations", True):
+            return "off"
+        return "reduced" if STATE.get("performance_mode", True) else "full"
+
+    def _motion_enabled(self):
+        return self._effects_level() != "off" and STATE.get("sparkle_background", True)
 
     def _mobile_welcome(self):
         page = BoxLayout(orientation="vertical", size_hint_y=None)
         page.bind(minimum_height=page.setter("height"))
         if GLASS_ASSET.is_file():
-            self._welcome_art = GlassArtwork(GLASS_ASSET, T("bg_top"), size_hint_y=None, height=dp(260))
+            self._welcome_art = GlassArtwork(GLASS_ASSET, T("bg_top"), size_hint_y=None, height=dp(244))
             page.add_widget(self._welcome_art)
             self._resize_welcome()
             self._welcome_art.set_motion(self._motion_enabled())
-        content = BoxLayout(orientation="vertical", padding=(dp(22), 0, dp(22), dp(18)),
-                            spacing=dp(7), size_hint_y=None)
+        content = BoxLayout(orientation="vertical", padding=(dp(16), 0, dp(16), dp(12)),
+                            spacing=dp(8), size_hint_y=None)
         content.bind(minimum_height=content.setter("height"))
-        title = make_label("Что разберём?", 37, bold=True, halign="center", size_hint_y=None, height=dp(48))
-        title.bind(width=lambda item, width: setattr(item, "font_size", sp(31 if width < dp(346) else 37)))
-        content.add_widget(title)
-        content.add_widget(make_label("Задай вопрос или набросай идею.", 13, "text_dim",
-                                      halign="center", size_hint_y=None, height=dp(30)))
-        content.add_widget(Widget(size_hint_y=None, height=dp(2)))
-        choices = GridLayout(cols=2, size_hint_y=None, height=dp(135), spacing=dp(9))
-        for label, icon, prompt in (
-            ("Разобраться в теме", "history", "Помоги разобраться в теме: "),
-            ("Написать текст", "pen", "Помоги написать текст: "),
-            ("Помочь с кодом", "code", "Разбери этот код:\n"),
-            ("Составить план", "plan", "Составь план для задачи: "),
-        ):
-            tile = CardButton(lambda value=prompt: self._mobile_draft(value), T("panel"), T("panel3"),
-                              orientation="horizontal", radius=13, spacing=dp(8),
-                              padding=(dp(9), dp(12), dp(7), dp(12)))
-            glyph = Glyph(icon, T("accent"), icon_size=18, size_hint_x=None, width=dp(32))
-            surface(glyph, T("accent_soft"), radius=9)
-            tile.add_widget(glyph)
-            tile.add_widget(make_label(label, 13, bold=True))
-            choices.add_widget(tile)
+        greeting = AnchorLayout(size_hint_y=None, height=dp(39))
+        words = BoxLayout(size_hint_x=None, width=dp(170), spacing=dp(4))
+        words.add_widget(make_label("Привет!", 30, bold=True, halign="center"))
+        words.add_widget(KivyImage(source=str(ASSETS / "wave-hand.png"),
+                                   size_hint_x=None, width=dp(26), allow_stretch=True, keep_ratio=True))
+        greeting.add_widget(words)
+        content.add_widget(greeting)
+        content.add_widget(make_label("Я Aish — твой умный\nAI-помощник", 15, "text_dim",
+                                      halign="center", size_hint_y=None, height=dp(44)))
+        content.add_widget(Widget(size_hint_y=None, height=dp(6)))
+        choices = GridLayout(cols=3, size_hint_y=None, height=dp(105), spacing=dp(12))
+        shortcuts = (
+            (("Новый\nчат", "chat", self._start_welcome_chat),
+             ("Генерация\nизображений", "image", self.open_image_studio),
+             ("Анализ\nфото", "camera", self.choose_photo)),
+            (("Написать\nтекст", "pen", lambda: self._mobile_draft("Помоги написать текст: ")),
+             ("Помощь\nс кодом", "code", lambda: self._mobile_draft("Разбери этот код:\n")),
+             ("Составить\nплан", "plan", lambda: self._mobile_draft("Составь план для задачи: "))),
+        )
+        dots = BoxLayout(size_hint_x=None, width=dp(68), spacing=dp(5))
+        indicators = []
+
+        def show_shortcuts(which):
+            choices.clear_widgets()
+            for index, (label, icon, action) in enumerate(shortcuts[which]):
+                tile = CardButton(action, T("accent_soft" if not index else "panel"),
+                                  T("accent" if not index else "panel3"), orientation="vertical",
+                                  radius=19, spacing=dp(3), padding=(dp(4), dp(9), dp(4), dp(8)))
+                tile.add_widget(Glyph(icon, T("accent" if not index else "chip_text"), icon_size=34))
+                tile.add_widget(make_label(label, 12, halign="center", size_hint_y=None, height=dp(39)))
+                choices.add_widget(tile)
+            for index, button in enumerate(indicators):
+                button.glyph.ink = T("accent" if index == which else "text_faint")
+                button.glyph.draw()
+
+        for index in range(len(shortcuts)):
+            dot = IconAction("", "dot", lambda number=index: show_shortcuts(number), self._nav_color,
+                             size_hint=(1, 1), icon_size=18)
+            indicators.append(dot)
+            dots.add_widget(dot)
+        show_shortcuts(0)
         content.add_widget(choices)
+        page_dots = AnchorLayout(size_hint_y=None, height=dp(31))
+        page_dots.add_widget(dots)
+        content.add_widget(page_dots)
         page.add_widget(content)
         return page
 
     def _resize_welcome(self, *_):
         if self._welcome_art:
-            self._welcome_art.height = min(dp(278), max(dp(118), self.scroll.height - dp(295)))
+            self._welcome_art.height = min(dp(282), max(dp(100), self.scroll.height - dp(246)))
+
+    def _start_welcome_chat(self):
+        if not self.busy:
+            self.input.focus = True
+
+    def open_photo_tools(self):
+        page = self._mobile_section("photo", "Фото")
+        self._mobile_links(page, (
+            ("Анализ фото", "Выбрать фото с устройства", "camera", self.choose_photo),
+            ("Генерация и галерея", "Создать или открыть изображение", "image", self.open_image_studio),
+        ))
 
     def _render_photo(self):
         row = self.photo_row
@@ -4321,39 +4454,71 @@ class ChatRoot(BoxLayout):
         self.input.focus = True
 
     def _add_mobile_reply_actions(self, bubble):
-        actions = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(3), padding=(0, dp(3), 0, 0))
-        hairline(actions, T("panel3"))
+        actions = BoxLayout(size_hint_y=None, height=dp(39), spacing=dp(6), padding=(0, dp(3), 0, 0))
         for icon, callback in (
-            ("copy", lambda: self.copy_text(bubble.text)),
             ("bookmark", lambda: self._toggle_star(bubble)),
             ("refresh", lambda: self._regenerate(bubble)),
+            ("copy", lambda: self.copy_text(bubble.text)),
+            ("share", lambda: self._share_reply(bubble.text)),
+            ("volume", lambda: self._speak_reply(bubble.text)),
         ):
-            actions.add_widget(IconAction("", icon, callback, self._nav_color, button_width=38,
+            actions.add_widget(IconAction("", icon, callback, self._nav_color, button_width=31,
                                             size_hint=(None, 1), icon_size=17,
-                                            variant="pill" if icon == "bookmark" and bubble.starred else "quiet"))
+                                            variant="solid" if icon == "volume" else "outline"))
         actions.add_widget(Widget())
         if STATE["show_time"]:
             actions.add_widget(make_label(bubble.ts, 10, "text_faint", halign="right",
                                           size_hint_x=None, width=dp(38)))
-        bubble.bubble.add_widget(actions)
+        bubble.add_reply_actions(actions)
+
+    def _share_reply(self, text):
+        if kivy_platform == "android":
+            try:
+                from android.runnable import run_on_ui_thread
+                from jnius import autoclass
+
+                @run_on_ui_thread
+                def share():
+                    intent_type = autoclass("android.content.Intent")
+                    native = autoclass("org.kivy.android.PythonActivity").mActivity
+                    intent = intent_type(intent_type.ACTION_SEND)
+                    intent.setType("text/plain")
+                    intent.putExtra(intent_type.EXTRA_TEXT, text)
+                    native.startActivity(intent_type.createChooser(intent, "Поделиться ответом"))
+
+                share()
+                return
+            except (ImportError, RuntimeError):
+                pass
+        self.copy_text(text)
+
+    def _speak_reply(self, text):
+        def speak():
+            if not voice_output(text):
+                Clock.schedule_once(lambda *_: self.toast("Озвучивание недоступно на устройстве"), 0)
+
+        threading.Thread(target=speak, name="aish-tts", daemon=True).start()
 
     def _mobile_section(self, key, title, back=None, title_action=None, back_label=None):
         self.input.focus = False
         if self._welcome_art:
             self._welcome_art.set_motion(False)
         self.section_screen.clear_widgets()
+        self._section_title = title
+        self._section_back = back or self.show_mobile_chat
         page = BoxLayout(orientation="vertical")
-        top = BoxLayout(size_hint_y=None, height=dp(62), padding=(dp(17), dp(7), dp(14), dp(7)),
+        top = BoxLayout(size_hint_y=None, height=dp(60), padding=(dp(17), dp(7), dp(14), dp(7)),
                         spacing=dp(7))
-        hairline(top, T("panel3"), top=False)
+        centered = back is not None
         if back:
-            caption = back_label or {"chat": "Чат", "history": "Диалоги", "studio": "Студия",
-                                      "tools": "Утилиты", "more": "Ещё"}[key]
-            top.add_widget(IconAction(caption, "back", back, self._nav_color, button_width=110,
+            top.add_widget(IconAction("", "back", back, self._nav_color, button_width=39,
                                         size_hint=(None, 1), icon_size=19))
-        else:
-            top.add_widget(Glyph("asterisk", T("accent"), icon_size=24, size_hint_x=None, width=dp(29)))
-            top.add_widget(make_label("Aish", 21, bold=True))
+        top.add_widget(make_label(title, 19 if centered else 22, bold=True,
+                                  halign="center" if centered else "left", shorten=True))
+        if title_action:
+            top.add_widget(title_action)
+        elif centered:
+            top.add_widget(Widget(size_hint_x=None, width=dp(39)))
         page.add_widget(top)
         scroller = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"],
                               bar_color=(*T("accent")[:3], .35), always_overscroll=False)
@@ -4365,11 +4530,8 @@ class ChatRoot(BoxLayout):
         self.section_screen.add_widget(page)
         self.mobile_screens.current = "section"
         self._activate_mobile_tab(key)
-        headline = BoxLayout(size_hint_y=None, height=dp(60 if len(title) < 23 else 77), spacing=dp(8))
-        headline.add_widget(make_label(title, 34 if len(title) < 23 else 29, bold=True))
-        if title_action:
-            headline.add_widget(title_action)
-        content.add_widget(headline)
+        self._set_wave_context()
+        self._refresh_bottom_layout()
         if self._motion_enabled():
             content.opacity = .66
             Animation(opacity=1, d=.18, t="out_quad").start(content)
@@ -4401,7 +4563,7 @@ class ChatRoot(BoxLayout):
     def _mobile_heading(text):
         return make_label(text, 14, "text_dim", bold=True, size_hint_y=None, height=dp(27))
 
-    def _mobile_card(self, label, icon, callback, subtitle="", selected=False, grouped=False):
+    def _mobile_card(self, label, icon, callback, subtitle="", selected=False, grouped=False, trailing=""):
         fill = T("accent_soft") if selected else (0, 0, 0, 0) if grouped else T("panel")
         border = (0, 0, 0, 0) if grouped else T("panel3")
         row = CardButton(callback, fill, border, radius=12, size_hint_y=None, height=dp(61 if grouped else 68),
@@ -4414,8 +4576,12 @@ class ChatRoot(BoxLayout):
         if subtitle:
             names.add_widget(make_label(subtitle, 11.5, "text_dim", shorten=True, size_hint_y=.43))
         row.add_widget(names)
-        row.add_widget(Glyph("check" if selected else "chevron", T("accent" if selected else "text_faint"),
-                             icon_size=17, size_hint_x=None, width=dp(19)))
+        if trailing:
+            row.add_widget(make_label(trailing, 10.5, "text_dim", halign="right",
+                                      size_hint_x=None, width=dp(41)))
+        else:
+            row.add_widget(Glyph("check" if selected else "chevron", T("accent" if selected else "text_faint"),
+                                 icon_size=17, size_hint_x=None, width=dp(19)))
         return row
 
     def _mobile_group(self, page, items):
@@ -4472,13 +4638,10 @@ class ChatRoot(BoxLayout):
             page.add_widget(self._mobile_card(label, icon, action, detail))
 
     def open_mobile_history(self):
-        create = AnchorLayout(size_hint_x=None, width=dp(118))
-        create.add_widget(IconAction("Новый чат", "plus", self.new_chat, self._nav_color,
-                                       variant="solid", button_width=118, button_height=40, icon_size=17))
-        page = self._mobile_section("history", "Диалоги", title_action=create)
-        page.add_widget(make_label("История хранится на устройстве.", 13, "text_dim",
-                                   size_hint_y=None, height=dp(23)))
-        query = self._mobile_field("Поиск по диалогам", icon="search")
+        create = IconAction("", "plus", self.new_chat, self._nav_color,
+                            variant="outline", button_width=39, button_height=39, icon_size=21)
+        page = self._mobile_section("history", "История диалогов", title_action=create)
+        query = self._mobile_field("Поиск по диалогам…", icon="search")
         page.add_widget(query)
         show_archive = False
 
@@ -4500,33 +4663,21 @@ class ChatRoot(BoxLayout):
                         if not needle or needle in row["title"].casefold() or row["id"] in matches]
             if not sessions:
                 listing.add_widget(self._mobile_heading("Диалоги не найдены" if needle else "Диалогов пока нет"))
-            previous = None
-            today = DT.now().date()
             for row in sessions:
-                date = row["updated"][:10]
-                if row["pinned"]:
-                    group = "Закреплённые"
-                elif date == today.isoformat():
-                    group = "Сегодня"
-                elif date == today.fromordinal(today.toordinal()-1).isoformat():
-                    group = "Вчера"
-                else:
-                    group = date
-                if group != previous:
-                    listing.add_widget(self._mobile_heading(group))
-                    previous = group
-                item = BoxLayout(size_hint_y=None, height=dp(66), spacing=dp(7))
-                card = self._mobile_card(row["title"], "chat",
-                    lambda sid=row["id"]: self.open_chat_by_id(sid),
-                    "Черновик" if row["has_draft"] else row["updated"][11:16])
-                card.size_hint_y = 1
+                date = row["updated"]
+                stamp = date[11:16] if date[:10] == DT.now().date().isoformat() else date[8:10] + "." + date[5:7]
+                item = BoxLayout(size_hint_y=None, height=dp(61))
+                surface(item, T("panel"), T("panel3"), radius=17)
+                card = self._mobile_card(row["title"], "bookmark" if row["pinned"] else "chat",
+                    lambda sid=row["id"]: self.open_chat_by_id(sid), "Черновик" if row["has_draft"] else row["preview"],
+                    grouped=True, trailing=stamp)
                 item.add_widget(card)
                 more = IconAction("", "more", lambda value=row: self._chat_options(value, None, render),
-                                    self._nav_color, variant="outline", button_width=41, size_hint=(None, 1))
+                                    self._nav_color, button_width=30, size_hint=(None, 1), icon_size=14)
                 item.add_widget(more)
                 listing.add_widget(item)
 
-        query.bind(text=render)
+        query.bind(text=Clock.create_trigger(render, .2))
         render()
 
     def open_mobile_studio(self):
@@ -4835,10 +4986,24 @@ class ChatRoot(BoxLayout):
             STATE[key] = bool(enabled)
             save_settings()
 
-        def set_motion(enabled):
-            STATE["message_animations"] = STATE["sparkle_background"] = bool(enabled)
-            self._set_sparkles_enabled(enabled)
-            save_settings()
+        effect_names = {"full": "Полные", "reduced": "Уменьшенные", "off": "Отключены"}
+
+        def choose_effects():
+            popup, _, listing = self._workspace_list("Визуальные эффекты")
+
+            def select(level):
+                STATE["message_animations"] = STATE["sparkle_background"] = level != "off"
+                STATE["performance_mode"] = level != "full"
+                set_effects(level)
+                self._set_sparkles_enabled(level != "off")
+                save_settings()
+                popup.dismiss()
+                self.open_mobile_settings()
+
+            for level, name in effect_names.items():
+                listing.add_widget(popup_button(name, lambda value=level: select(value),
+                                                "accent" if level == self._effects_level() else "default"))
+            popup.open()
 
         def choose_font():
             if self.busy:
@@ -4867,32 +5032,29 @@ class ChatRoot(BoxLayout):
                 popup.dismiss()
                 self._mobile_theme(name)
 
-            for key, label in (("aurora", "Бирюзовая"), ("midnight", "Полночь")):
+            for key, label in (("aurora", "Тёмная (изумрудная)"), ("midnight", "Полночь")):
                 listing.add_widget(popup_button(label, lambda value=key: select(value),
                                                 "accent" if STATE["theme"] == key else "default"))
             listing.add_widget(popup_button("Все темы", lambda: (popup.dismiss(), self.open_settings())))
             popup.open()
 
-        page.add_widget(self._mobile_heading("Оформление"))
+        profile = self._mobile_card("Aish", "asterisk", self.open_mobile_more,
+                                    "Инструменты и данные приложения", selected=True)
+        profile.height = dp(76)
+        page.add_widget(profile)
         self._mobile_group(page, [
-            self._mobile_card("Тема", "sliders", choose_theme, TV("name"), grouped=True),
-            self._mobile_card("Размер текста", "text", choose_font, fonts[STATE["font_size"]], grouped=True),
-            switch_item("Анимация", "bolt", self._motion_enabled(), set_motion),
-        ])
-        page.add_widget(self._mobile_heading("Чат"))
-        self._mobile_group(page, [
-            self._mobile_card("Модель", "cloud", lambda: self.open_model_picker(self.open_mobile_settings),
+            self._mobile_card("Модель нейросети", "sliders", lambda: self.open_model_picker(self.open_mobile_settings),
                               self._model_label(), grouped=True),
-            switch_item("Учитывать память", "brain", STATE["use_memory_context"],
-                        lambda enabled: preference("use_memory_context", enabled)),
+            self._mobile_card("Тема оформления", "sliders", choose_theme,
+                              "Тёмная (изумрудная)" if STATE["theme"] == "aurora" else TV("name"), grouped=True),
+            self._mobile_card("Размер текста", "text", choose_font, fonts[STATE["font_size"]], grouped=True),
+            self._mobile_card("Визуальные эффекты", "studio", choose_effects,
+                              effect_names[self._effects_level()], grouped=True),
             switch_item("Потоковый вывод", "check", STATE["streaming"],
                         lambda enabled: preference("streaming", enabled)),
-        ])
-        page.add_widget(self._mobile_heading("Данные приложения"))
-        self._mobile_group(page, [
-            self._mobile_card("История чатов", "clock", self.open_mobile_history, "На устройстве", grouped=True),
-            self._mobile_card("Экспорт и резервная копия", "shield", self.open_mobile_data,
-                              "Управление локальными данными", grouped=True),
+            switch_item("Голосовой ответ", "volume", STATE["voice_out"],
+                        lambda enabled: preference("voice_out", enabled)),
+            self._mobile_card("Память и данные", "history", self.open_mobile_data, grouped=True),
         ])
         page.add_widget(popup_button("Все настройки", self.open_settings))
 
@@ -5035,6 +5197,13 @@ class ChatRoot(BoxLayout):
         """Adapt layout to rotation/window changes without mistaking IME resize for rotation."""
         landscape = Window.width > Window.height
         self._is_landscape = landscape
+        if self.desktop_sidebar is not None:
+            wide = self.width >= dp(790)
+            visible = self.desktop_sidebar in self.workspace.children
+            if wide and not visible:
+                self.workspace.add_widget(self.desktop_sidebar, index=1)
+            elif visible and not wide:
+                self.workspace.remove_widget(self.desktop_sidebar)
         try:
             self.header_widget.height = dp(56 if landscape else 66)
             self._refresh_bottom_layout()
@@ -5138,7 +5307,8 @@ class ChatRoot(BoxLayout):
         # The default performance profile is static: no perpetual redraws behind chat.
         # Decorative motion is available only when the user disables performance mode.
         if not low_power:
-            self._spark_event = Clock.schedule_interval(self._animate_sparks, 1.0 / 18.0)
+            if STATE["theme"] != "aurora":
+                self._spark_event = Clock.schedule_interval(self._animate_sparks, 1.0 / 18.0)
             self._aurora_event = Clock.schedule_interval(self._animate_aurora, 1.0 / 12.0)
 
     def _animate_sparks(self, dt):
@@ -5194,6 +5364,9 @@ class ChatRoot(BoxLayout):
         self.bg_glow_5.size = (width*0.60, dp(250))
         self.bg_halo_1.ellipse = (self.x+dp(16), self.y+dp(52), width*0.72, dp(310))
         self.bg_halo_2.ellipse = (self.x+width*0.32, self.top-dp(405), width*0.55, dp(220))
+        for index, (_ink, ribbon) in enumerate(self._jade_ribbons):
+            ribbon.pos = (self.x, self.y + height * (.42 if index == 0 else -.18))
+            ribbon.size = (width, min(height * .49, dp(460)))
 
     def _animate_aurora(self, dt):
         """Slow iridescent fluid drift; subtle enough to keep controls and text crisp."""
@@ -5202,6 +5375,10 @@ class ChatRoot(BoxLayout):
                 return True
             self._aurora_phase = (self._aurora_phase + max(0.0, min(float(dt), 0.12)) * 0.46) % (math.pi * 2.0)
             phase = self._aurora_phase
+            if self._jade_ribbons:
+                if self._welcome_panel is not None and self.mobile_screens.current == "chat":
+                    self._jade_ribbons[0][0].a = .74 + .07 * math.sin(phase)
+                return True
             width = max(1.0, float(self.width))
             height = max(1.0, float(self.height))
             drift_x = math.sin(phase) * width * 0.045
@@ -5255,9 +5432,12 @@ class ChatRoot(BoxLayout):
             self.composer_widget.height = dp(59)
         self.composer_dock.height = self.composer_widget.height + dp(18)
         self.bottom_bar.height = self.composer_dock.height + chips_height
-        self.navigation.height = 0 if self._keyboard_visible else dp(72)
-        self.navigation.opacity = 0 if self._keyboard_visible else 1
-        self.navigation.disabled = self._keyboard_visible
+        in_chat = self.mobile_screens.current == "chat"
+        show_nav = not self._keyboard_visible and not (in_chat and not self._welcome_panel)
+        show_nav = show_nav and (in_chat or getattr(self, "_section_title", "") != "Настройки")
+        self.navigation.height = dp(65) if show_nav else 0
+        self.navigation.opacity = int(show_nav)
+        self.navigation.disabled = not show_nav
         self._place_composer()
 
     def _place_composer(self, *_):
@@ -5266,21 +5446,21 @@ class ChatRoot(BoxLayout):
         top = frame.y + frame.height
         expanded = self._composer_expanded
         self.action_slot.pos = (right - dp(53), frame.y + dp(7))
-        self.attach_button.pos = ((frame.x + dp(7)) if expanded else (right - dp(92)), frame.y + dp(7))
+        self.attach_button.pos = (frame.x + dp(5), frame.y + dp(7))
         self.photo_button.pos = (right - dp(132), frame.y + dp(7))
         self.composer_photo_button.pos = (frame.x + dp(41), frame.y + dp(7))
-        self.photo_button.opacity, self.photo_button.disabled = (0, True) if expanded else (1, False)
+        self.photo_button.opacity, self.photo_button.disabled = (0, True)
         self.composer_photo_button.opacity = int(expanded)
         self.composer_photo_button.disabled = not expanded
         if self.composer_mic_button:
-            self.composer_mic_button.pos = (frame.x + dp(121), frame.y + dp(7))
-            self.composer_mic_button.opacity = int(expanded)
-            self.composer_mic_button.disabled = not expanded
-        horizontal_offset = dp(15)
-        right_offset = dp(15 if expanded else 135)
+            self.composer_mic_button.pos = ((frame.x + dp(121)) if expanded else (right - dp(99)), frame.y + dp(7))
+            self.composer_mic_button.opacity = 1
+            self.composer_mic_button.disabled = False
+        horizontal_offset = dp(15 if expanded else 49)
+        right_offset = dp(15 if expanded else 103 if self.composer_mic_button else 57)
         self.input.width = max(dp(40), frame.width - horizontal_offset - right_offset)
         self.input.pos = (frame.x + horizontal_offset, frame.y + dp(52 if expanded else 6))
-        self.input.hint_text = "Сообщение для Aish" if self.input.width >= dp(168) else "Сообщение…"
+        self.input.hint_text = "Напиши сообщение…" if self.input.width >= dp(168) else "Сообщение…"
         self.photo_row.pos = (frame.x + dp(10), top - self.photo_row.height - dp(8))
         self.photo_row.width = max(0, frame.width - dp(20))
 
@@ -5455,7 +5635,7 @@ class ChatRoot(BoxLayout):
             self._welcome_art.set_motion(False)
             self._welcome_art = None
         if not records:
-            self.title_lbl.text = "Новый чат"
+            self.title_lbl.text = "Aish"
             self._set_chips_visible(False)
             teal = STATE["theme"] == "aurora"
             self.messages_box.padding = (0, 0) if teal else (dp(16), dp(10))
@@ -5487,6 +5667,9 @@ class ChatRoot(BoxLayout):
                                  starred=bool(row.get("starred", 0)), interrupted=interrupted,
                                  image_path=image_path, animate=False)
         self._update_status()
+        self._set_wave_context()
+        self._refresh_bottom_layout()
+        self._refresh_desktop_history()
         if records:
             Clock.schedule_once(lambda *_: self.scroll_to_bottom(force=True), 0.1)
         else:
@@ -5503,7 +5686,7 @@ class ChatRoot(BoxLayout):
                     interrupted=False, image_path="", animate=True):
         welcome = getattr(self, "_welcome_panel", None)
         if welcome is not None:
-            self.title_lbl.text = "Чат"
+            self.title_lbl.text = "Диалог с Aish"
             self.messages_box.padding = (dp(22), dp(14))
             if self._welcome_art:
                 self._welcome_art.set_motion(False)
@@ -5514,6 +5697,8 @@ class ChatRoot(BoxLayout):
                 pass
             self._welcome_panel = None
             self._add_chat_date(DT.now().date().isoformat())
+            self._set_wave_context()
+            self._refresh_bottom_layout()
         animate = bool(animate and STATE.get("message_animations", True)
                        and (not STATE.get("performance_mode", True) or role == "ai"))
         bubble = MessageBubble(role, text, ts=ts, msg_id=msg_id, starred=starred,
@@ -5533,6 +5718,8 @@ class ChatRoot(BoxLayout):
 
     def _update_status(self):
         self._sync_model_button()
+        self.menu_button.glyph.name = "tools" if self._welcome_panel else "back"
+        self.menu_button.glyph.draw()
         if self.busy:
             return
         if self._photo_load_token is not None:
@@ -5977,7 +6164,7 @@ class ChatRoot(BoxLayout):
                                       providers=(VISION_PROVIDER,) if photo_path else None)
         except Exception as exc:
             error = f"{type(exc).__name__}: {str(exc)[:140]}"
-        interrupted = cancel_event.is_set()
+        interrupted = cancel_event.is_set() or bool(reply and error and chunks_seen)
         stored_text = None
         if reply:
             stored_text = ("[прервано] " if interrupted else "") + reply
@@ -6020,6 +6207,8 @@ class ChatRoot(BoxLayout):
                 self.add_message("ai", final_text, msg_id=reply_id, interrupted=True)
             else:
                 self.add_message("ai", "Генерация остановлена.")
+            if reply and error and not (self.cancel_event and self.cancel_event.is_set()):
+                self.toast("Связь прервалась. Полученная часть ответа сохранена.")
         elif reply:
             if bubble is not None:
                 bubble.set_text(reply)
@@ -6030,7 +6219,7 @@ class ChatRoot(BoxLayout):
                 new_bubble = self.add_message("ai", "", msg_id=reply_id)
                 new_bubble.reveal_text(reply)
             if STATE["voice_out"]:
-                threading.Thread(target=voice_output, args=(reply,), daemon=True).start()
+                self._speak_reply(reply)
         else:
             concise = error or "Неизвестная ошибка"
             if len(concise) > 360:
@@ -6258,8 +6447,9 @@ class ChatRoot(BoxLayout):
         preview.bind(size=lambda *_: setattr(preview, "text_size", preview.size))
         listing.add_widget(preview)
         listing.add_widget(popup_button("Копировать", lambda: (self.copy_text(bubble.text), popup.dismiss())))
-        if ANDROID:
-            listing.add_widget(popup_button("Озвучить", lambda: (threading.Thread(target=voice_output, args=(bubble.text,), daemon=True).start(), popup.dismiss())))
+        if ANDROID or kivy_platform in ("android", "win"):
+            listing.add_widget(popup_button("Озвучить", lambda: (self._speak_reply(bubble.text), popup.dismiss())))
+        listing.add_widget(popup_button("Поделиться", lambda: (self._share_reply(bubble.text), popup.dismiss())))
         listing.add_widget(popup_button("Сохранить в заметки", lambda: (db_note_add(bubble.text), popup.dismiss(), self.toast("Сохранено в заметки"))))
         label = "Убрать из избранного" if bubble.starred else "Добавить в избранное"
         listing.add_widget(popup_button(label, lambda: self._toggle_star(bubble, popup), "accent"))
@@ -8748,13 +8938,14 @@ class ChatApp(App):
         self.title = "Aish"
         Window.clearcolor = T("bg_top")
         host = AnchorLayout()
-        self.root_widget = ChatRoot(size_hint_max_x=dp(570) if kivy_platform != "android" else None)
+        self.root_widget = ChatRoot(size_hint_max_x=dp(1280) if kivy_platform == "win" else None)
         host.add_widget(self.root_widget)
         return host
 
     def on_start(self):
         """Enable tablet rotation where appropriate and check Releases off the UI thread."""
-        self._enable_tablet_rotation()
+        if kivy_platform == "android":
+            self._enable_tablet_rotation()
         threading.Thread(
             target=self._check_for_updates_worker,
             daemon=True,
@@ -8814,17 +9005,18 @@ class ChatApp(App):
             release_url = str(
                 release.get("html_url", "https://github.com/awayRu/Aish/releases")
             ).strip()
-            apk_asset = next(
+            extension = ".exe" if kivy_platform == "win" else ".apk"
+            platform_asset = next(
                 (
                     asset for asset in (release.get("assets") or [])
-                    if str(asset.get("name", "")).lower().endswith(".apk")
+                    if str(asset.get("name", "")).lower().endswith(extension)
                     and asset.get("browser_download_url")
                 ),
                 None,
             )
             download_url = (
-                str(apk_asset["browser_download_url"])
-                if apk_asset else release_url
+                str(platform_asset["browser_download_url"])
+                if platform_asset else release_url
             )
             release_notes = str(release.get("body", "")).strip()[:700]
             Clock.schedule_once(
@@ -8946,7 +9138,7 @@ class ChatApp(App):
         except Exception:
             pass
         self.root.remove_widget(old)
-        self.root_widget = ChatRoot(size_hint_max_x=dp(570) if kivy_platform != "android" else None)
+        self.root_widget = ChatRoot(size_hint_max_x=dp(1280) if kivy_platform == "win" else None)
         self.root.add_widget(self.root_widget)
         Window.clearcolor = T("bg_top")
 
