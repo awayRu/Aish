@@ -90,6 +90,9 @@ jobs:
             echo "Build log was not created."
           fi
 
+      - name: Verify packaged native dependencies and assets
+        run: python .github/scripts/verify_android_apk.py bin/*.apk
+
       - name: Decode and validate persistent signing key
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -187,7 +190,8 @@ jobs:
           grep -Fx 'Signer #1 certificate SHA-256 digest: abde9d7f177f24046a534c1b155867edd7caeaf7a88f2b6fd921dd2d48cba3c5' "$RUNNER_TEMP/aish-signature.txt"
           "$BUILD_TOOLS/aapt2" dump badging "$SIGNED_APK" > "$RUNNER_TEMP/aish-badging.txt"
           grep -E "^package: name='org\.aichat\.aichat' versionCode='${RELEASE_TAG#v}' " "$RUNNER_TEMP/aish-badging.txt"
-          grep -Fx "minSdkVersion:'24'" "$RUNNER_TEMP/aish-badging.txt"
+          grep -Ex "(minSdkVersion|sdkVersion):'24'" "$RUNNER_TEMP/aish-badging.txt"
+          grep -Fx "targetSdkVersion:'31'" "$RUNNER_TEMP/aish-badging.txt"
           grep -E "^native-code: .*'arm64-v8a'" "$RUNNER_TEMP/aish-badging.txt"
           grep -E "^native-code: .*'armeabi-v7a'" "$RUNNER_TEMP/aish-badging.txt"
           if grep -Fxq 'application-debuggable' "$RUNNER_TEMP/aish-badging.txt"; then
@@ -199,7 +203,6 @@ jobs:
             echo 'Refusing to publish a test-only APK.'
             exit 1
           fi
-          python .github/scripts/verify_android_apk.py "$SIGNED_APK"
           rm -- "$APK" "$RUNNER_TEMP/aish-release.jks"
 
       - name: Upload APK artifact
@@ -256,14 +259,14 @@ jobs:
         with:
           name: apk
           path: bin
-      - name: Publish verified APK to GitHub Releases
+      - name: Stage verified APK in a draft release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
           name: Aish ${{ github.ref_name }}
           prerelease: false
-          make_latest: true
+          draft: true
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: bin/Aish-${{ github.ref_name }}-Android.apk
