@@ -3728,7 +3728,7 @@ class ChatRoot(BoxLayout):
         Clock.schedule_once(self._sync_background, 0)
         Window.bind(size=self._adapt_orientation, on_drop_file=self._on_file_dropped)
         if kivy_platform == "win":
-            Window.bind(on_key_down=self._desktop_commands)
+            Window.bind(on_keyboard=self._desktop_commands)
         Clock.schedule_once(lambda *_: self._install_android_keyboard_listener(), 0.7)
         self._initial_load_event = Clock.schedule_once(self._safe_initial_load, 0)
 
@@ -3757,7 +3757,7 @@ class ChatRoot(BoxLayout):
         self._dismiss_toast()
         self._photo_load_token = None
         if kivy_platform == "win":
-            Window.unbind(on_key_down=self._desktop_commands)
+            Window.unbind(on_keyboard=self._desktop_commands)
         if self._welcome_art:
             self._welcome_art.set_motion(False)
         for attr in ("_voice_callback", "_photo_callback"):
@@ -4019,6 +4019,7 @@ class ChatRoot(BoxLayout):
         scroller.add_widget(self.desktop_history)
         sidebar.add_widget(scroller)
         sidebar.add_widget(popup_button("Настройки", self.open_mobile_settings, height=dp(40)))
+        sidebar.add_widget(popup_button("Полный экран · F11", self._toggle_fullscreen, height=dp(39)))
         self.desktop_sidebar = sidebar
 
     def _refresh_desktop_history(self):
@@ -4046,17 +4047,20 @@ class ChatRoot(BoxLayout):
         else:
             self.open_mobile_history()
 
-    def _desktop_commands(self, _window, key, _scancode, codepoint, modifiers):
+    def _desktop_commands(self, _window, key, _scancode, _codepoint, modifiers):
         if key == 292:
-            Window.fullscreen = not Window.fullscreen
+            self._toggle_fullscreen()
             return True
-        if "ctrl" in modifiers:
-            shortcut = (codepoint or chr(key) if 0 <= key < 128 else "").lower()
-            action = {"n": self.new_chat, "k": self.open_mobile_history}.get(shortcut)
+        if "ctrl" in modifiers or "ctrl" in Window.modifiers:
+            action = {ord("n"): self.new_chat, ord("k"): self.open_mobile_history}.get(key)
             if action is not None:
                 action()
                 return True
         return False
+
+    @staticmethod
+    def _toggle_fullscreen():
+        Window.fullscreen = False if Window.fullscreen else "auto"
 
     @staticmethod
     def _nav_color(key):

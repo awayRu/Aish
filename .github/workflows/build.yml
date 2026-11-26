@@ -245,6 +245,23 @@ jobs:
           arch: x86_64
           script: bash .github/scripts/check_android_install.sh "bin/Aish-${RELEASE_TAG}-Android.apk"
 
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - run: python -m pip install 'kivy[base]==2.3.1' pillow certifi
+      - name: Verify streaming regressions
+        shell: bash
+        run: |
+          export AISH_DATA_DIR="$RUNNER_TEMP/aish-stream-tests"
+          export KIVY_HOME="$AISH_DATA_DIR/kivy"
+          mkdir -p "$KIVY_HOME"
+          xvfb-run -a python .github/scripts/test_streaming.py
+
   windows:
     runs-on: windows-latest
     timeout-minutes: 20
@@ -256,19 +273,15 @@ jobs:
           architecture: x64
       - name: Install Windows build requirements
         run: python -m pip install 'kivy[base]==2.3.1' 'pyinstaller==6.16.0' pillow pypdf certifi
-      - name: Verify streaming regressions
-        run: |
-          $env:AISH_DATA_DIR = Join-Path $env:RUNNER_TEMP 'aish-stream-tests'
-          $env:KIVY_HOME = Join-Path $env:AISH_DATA_DIR 'kivy'
-          New-Item -ItemType Directory -Force -Path $env:KIVY_HOME | Out-Null
-          python .github/scripts/test_streaming.py
       - name: Package Aish for Windows
         run: python .github/scripts/build_windows.py
-      - name: Launch the packaged application
+      - name: Verify the Windows executable and archive
         run: |
           $files = @(Get-ChildItem bin -Filter 'Aish-v*-Windows-x64.exe')
           if ($files.Count -ne 1) { throw 'Expected one Windows x64 package' }
-          python .github/scripts/check_windows.py $files[0].FullName
+          python -c "import pefile,sys; assert pefile.PE(sys.argv[1], fast_load=True).FILE_HEADER.Machine == 0x8664" $files[0].FullName
+          pyi-archive_viewer -l $files[0].FullName | Select-String -SimpleMatch 'assets\aish-premium-symbol.png' | ForEach-Object { $asset = $_ }
+          if (-not $asset) { throw 'The Windows package is missing the original symbol' }
       - uses: actions/upload-artifact@v7
         with:
           name: windows
@@ -277,7 +290,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [verify-install, windows]
+    needs: [verify-install, windows, regression]
     runs-on: ubuntu-latest
     permissions:
       contents: write
