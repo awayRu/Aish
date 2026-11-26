@@ -392,6 +392,12 @@ class IconAction(ButtonBehavior, BoxLayout):
     def _update_caption(self, _button, value):
         self.caption.text = value
 
+    def on_touch_down(self, touch):
+        # Hidden composer actions overlap the compact input field.
+        if self.opacity == 0:
+            return False
+        return super().on_touch_down(touch)
+
     def _style(self, *_):
         tint = self.tint
         clear = (0, 0, 0, 0)
