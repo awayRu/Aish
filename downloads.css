@@ -99,6 +99,10 @@
 .platform-download span { font-size: 1.2rem; line-height: 1 }
 .downloads-footer { padding: 1.35rem 0 2rem; color: var(--muted); font-size: .9rem }
 .downloads-footer a { text-decoration: none }
+.release-preview { margin-top: 1rem; padding: clamp(1.25rem, 3vw, 1.9rem); border: 1px solid #365652; border-radius: 1.4rem; background: #122729 }
+.release-preview h2 { margin-top: 0 }
+.release-preview p { color: var(--muted); line-height: 1.45 }
+.preview-links { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem }
 .release-screens { margin-top: 2.5rem }
 .release-screens h2 { margin-bottom: 1rem }
 .release-gallery { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 1rem }
