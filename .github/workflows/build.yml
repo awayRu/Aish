@@ -160,20 +160,15 @@ jobs:
 
           APK="${APK_FILES[0]}"
 
-          APKSIGNER="$(find \
-            "$HOME/.buildozer/android/platform/android-sdk" \
-            /usr/local/lib/android/sdk \
-            "${ANDROID_HOME:-/nonexistent}" \
-            "${ANDROID_SDK_ROOT:-/nonexistent}" \
-            -type f -path '*/build-tools/*/apksigner' \
-            -print 2>/dev/null | sort -V | tail -n 1)"
-
-          test -n "$APKSIGNER" || {
-            echo 'Could not find Android apksigner.'
-            exit 1
-          }
-
-          BUILD_TOOLS="$(dirname "$APKSIGNER")"
+          # Use a single installed SDK. Searching missing optional SDK paths
+          # makes find return a failure under pipefail even when it found a signer.
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [[ ! -d "$SDK/build-tools" ]]; then
+            SDK="$HOME/.buildozer/android/platform/android-sdk"
+          fi
+          BUILD_TOOLS=$(find "$SDK/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          test -x "$APKSIGNER" && test -x "$BUILD_TOOLS/zipalign" && test -x "$BUILD_TOOLS/aapt2"
           ALIGNED_APK="$RUNNER_TEMP/aish-aligned.apk"
           SIGNED_APK="bin/Aish-${RELEASE_TAG}-Android.apk"
           "$BUILD_TOOLS/zipalign" -P 16 -f 4 "$APK" "$ALIGNED_APK"
