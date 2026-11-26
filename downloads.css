@@ -99,6 +99,12 @@
 .platform-download span { font-size: 1.2rem; line-height: 1 }
 .downloads-footer { padding: 1.35rem 0 2rem; color: var(--muted); font-size: .9rem }
 .downloads-footer a { text-decoration: none }
+.release-screens { margin-top: 2.5rem }
+.release-screens h2 { margin-bottom: 1rem }
+.release-gallery { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 1rem }
+.release-gallery figure { margin: 0; padding: .85rem; border: 1px solid #2c4f42; border-radius: 1.15rem; background: #0a1c1a }
+.release-gallery img { display: block; width: 100%; max-height: 31rem; object-fit: contain; border-radius: .65rem; background: #041210 }
+.release-gallery figcaption { padding: .7rem .2rem .1rem; color: #c3ccca }
 @media (max-width: 600px) {
   .downloads-header, .downloads-main { width: calc(100% - 2rem) }
   .downloads-hero { min-height: 18rem; align-items: end }
@@ -107,6 +113,7 @@
   .downloads-copy { padding-top: 5.25rem }
   .platforms { grid-template-columns: 1fr; gap: .75rem }
   .platform-download { width: 100% }
+  .release-gallery { grid-template-columns: 1fr }
   .top-download { min-height: 2.6rem; padding: .45rem .56rem }
 }
 @media (max-width: 380px) {
