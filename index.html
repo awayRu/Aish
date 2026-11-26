@@ -1,0 +1,124 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e2023">
+<meta name="description" content="Aish — веб-чат с ИИ для вопросов, текста и кода.">
+<title>Aish — веб-чат с ИИ</title>
+<link rel="stylesheet" href="./aish-v5.css">
+<link rel="stylesheet" href="./extras-v5.css">
+<link rel="stylesheet" href="./downloads.css">
+<script type="module" src="./aish-v5.mjs"></script>
+</head>
+<body>
+<a href="#main" class="skip">Перейти к содержимому</a>
+<svg class="icons-def" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a3 3 0 0 1-3 3h-8l-6 4V7a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m2 8 10-5 10 5-10 5zM2 12.5l10 5 10-5M2 17l10 5 10-5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M5 2h10l5 5v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM15 2v6h5M8 8h3m-3 5h8m-8 4h8"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m5 7-5 5 5 5m14-10 5 5-5 5m-4-13-6 16"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="m1 5 2 2 4-4m-6 9 2 2 4-4m-6 9 2 2 4-4m5-12h11m-11 7h11m-11 7h11"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 2 9l8 4 4 8zM10 13 22 2"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></symbol>
+</svg>
+<div class="shell">
+  <aside class="sidebar" id="sidebar" aria-label="Диалоги и разделы">
+    <div class="sidebar-head">
+      <span class="brand"><span class="mark" aria-hidden="true"></span>Aish</span>
+      <button class="icon close-menu" id="close-menu" type="button" aria-label="Закрыть меню"><svg class="glyph" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <button type="button" id="new" class="new"><span aria-hidden="true">＋</span> Новый чат</button>
+    <div class="history">
+      <h2>Диалоги</h2>
+      <div id="history-list"></div>
+      <div id="sidebar-examples" class="history-examples" aria-label="Идеи для нового диалога">
+        <button type="button" title="Вставить пример запроса" data-prompt="Помоги придумать пять идей для небольшого проекта, который можно закончить за выходные."><svg class="glyph" aria-hidden="true"><use href="#i-chat"/></svg>Идеи для проекта</button>
+        <button type="button" title="Вставить пример запроса" data-prompt="Объясни на простом примере, чем списки в Python отличаются от кортежей."><svg class="glyph" aria-hidden="true"><use href="#i-chat"/></svg>Разбор Python</button>
+        <button type="button" title="Вставить пример запроса" data-prompt="Помоги составить план на неделю. Спроси, какие у меня основные задачи."><svg class="glyph" aria-hidden="true"><use href="#i-chat"/></svg>План на неделю</button>
+      </div>
+    </div>
+    <nav class="site-nav" aria-label="Разделы Aish">
+      <button type="button" data-view="chat" aria-current="page"><svg class="glyph" aria-hidden="true"><use href="#i-chat"/></svg>Чат</button>
+      <button type="button" data-view="library"><svg class="glyph" aria-hidden="true"><use href="#i-layers"/></svg>Шаблоны</button>
+      <button type="button" data-view="tools"><svg class="glyph" aria-hidden="true"><use href="#i-code"/></svg>Инструменты</button>
+      <a class="site-download" href="./download.html"><svg class="glyph" aria-hidden="true"><use href="#i-download"/></svg>Скачать Aish</a>
+    </nav>
+    <div class="sidebar-foot">История хранится в этом браузере</div>
+  </aside>
+  <button type="button" class="scrim" id="scrim" aria-label="Закрыть меню" hidden></button>
+  <main class="main" id="main">
+    <section id="chat-view" class="view chat-view" aria-label="Чат Aish">
+      <header class="topbar">
+        <button type="button" class="icon open-menu" id="open-menu" aria-label="Открыть меню" aria-expanded="false" aria-controls="sidebar"><svg class="glyph" aria-hidden="true"><use href="#i-menu"/></svg></button>
+        <div class="current-title" id="current-title">Новый чат</div>
+        <details class="model">
+          <summary>Qwen3.8 Flash<svg class="glyph" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+          <p>Сообщения чата обрабатывает <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>.</p>
+        </details>
+        <a class="top-download" href="./download.html"><svg class="glyph" aria-hidden="true"><use href="#i-download"/></svg><span>Скачать<span class="sr-only"> Aish</span></span></a>
+      </header>
+      <div class="scroll" id="scroll">
+        <div class="page">
+          <section class="welcome" id="welcome">
+            <div class="hero-art" aria-hidden="true"></div>
+            <div class="welcome-copy">
+              <h1>Что разберём?</h1>
+              <p>Задай вопрос, пришли текст или набросай идею.</p>
+            </div>
+            <div class="suggestions">
+              <button type="button" data-prompt="Объясни простыми словами, чем ИИ отличается от обычной программы. Приведи один пример."><svg class="glyph" aria-hidden="true"><use href="#i-layers"/></svg><span>Разобраться в теме</span></button>
+              <button type="button" data-prompt="Помоги написать дружелюбное сообщение о переносе встречи. Дай два варианта разного тона."><svg class="glyph" aria-hidden="true"><use href="#i-file"/></svg><span>Написать текст</span></button>
+              <button type="button" data-prompt="Покажи, как читать JSON из файла в Python и обработать ошибку, если файл не найден."><svg class="glyph" aria-hidden="true"><use href="#i-code"/></svg><span>Помочь с кодом</span></button>
+              <button type="button" data-prompt="Составь реалистичный план, как за неделю подготовиться к контрольной. Укажи, что проверять каждый день."><svg class="glyph" aria-hidden="true"><use href="#i-list"/></svg><span>Составить план</span></button>
+            </div>
+          </section>
+          <section id="messages" class="messages" aria-label="Сообщения"></section>
+        </div>
+      </div>
+      <footer class="bottom">
+        <div class="compose-wrap">
+          <div id="request-status" class="request-status" role="status" hidden>
+            <span id="status-text"></span><button id="retry" type="button" hidden>Повторить</button>
+          </div>
+          <form id="compose">
+            <label for="prompt" class="sr-only">Сообщение</label>
+            <textarea id="prompt" rows="1" maxlength="8000" placeholder="Сообщение для Aish" required></textarea>
+            <button type="submit" id="send" class="send" aria-label="Отправить" title="Отправить"><svg class="glyph" aria-hidden="true"><use href="#i-send"/></svg></button>
+            <button type="button" id="stop" class="send" aria-label="Остановить ответ" title="Остановить ответ" hidden>■</button>
+          </form>
+          <div class="compose-foot">
+            <span>Запросы обрабатывает <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a></span>
+            <span class="key-hint">Enter для отправки</span>
+          </div>
+        </div>
+      </footer>
+    </section>
+    <section id="library-view" class="view utility-view" aria-label="Шаблоны запросов" hidden>
+      <header class="topbar">
+        <button type="button" data-open-menu class="icon open-menu" aria-label="Открыть меню" aria-expanded="false" aria-controls="sidebar"><svg class="glyph" aria-hidden="true"><use href="#i-menu"/></svg></button>
+        <div class="current-title">Шаблоны</div>
+      </header>
+      <div class="scroll utility-scroll"><div id="library-content" class="utility-content"></div></div>
+    </section>
+    <section id="tools-view" class="view utility-view" aria-label="Инструменты для текста" hidden>
+      <header class="topbar">
+        <button type="button" data-open-menu class="icon open-menu" aria-label="Открыть меню" aria-expanded="false" aria-controls="sidebar"><svg class="glyph" aria-hidden="true"><use href="#i-menu"/></svg></button>
+        <div class="current-title">Инструменты</div>
+      </header>
+      <div class="scroll utility-scroll"><div id="tools-content" class="utility-content"></div></div>
+    </section>
+  </main>
+</div>
+<dialog id="remove-dialog">
+  <form method="dialog">
+    <h2>Удалить диалог?</h2>
+    <p>Он будет удалён из истории этого браузера.</p>
+    <div class="dialog-actions"><button value="cancel" autofocus>Отмена</button><button value="remove" class="danger">Удалить</button></div>
+  </form>
+</dialog>
+</body>
+</html>
