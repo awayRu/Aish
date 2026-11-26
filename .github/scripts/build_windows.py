@@ -8,13 +8,15 @@ import platform
 import re
 import sys
 
-from PyInstaller.__main__ import run
-from kivy.tools.packaging.pyinstaller_hooks import hookspath
-
 
 def build():
     if sys.platform != "win32" or platform.machine().lower() not in {"amd64", "x86_64"}:
         raise SystemExit("The Windows x64 package must be built with 64-bit Windows Python.")
+    os.environ["KIVY_LOG_MODE"] = "PYTHON"
+    # PyInstaller probes imports in child processes. Keep those probes off the GPU.
+    os.environ["KIVY_GL_BACKEND"] = "mock"
+    from PyInstaller.__main__ import run
+    from kivy.tools.packaging.pyinstaller_hooks import hookspath
     parser = argparse.ArgumentParser()
     parser.add_argument("--dist", default="bin")
     parser.add_argument("--work", default="build/windows")
@@ -23,7 +25,7 @@ def build():
     version = re.search(r'^APP_VERSION = "(\d+)"$', (root / "main.py").read_text(encoding="utf-8"), re.M)[1]
     work = Path(args.work).resolve()
     work.mkdir(parents=True, exist_ok=True)
-    options = ["--noconfirm", "--onefile", "--windowed", "--noupx", "--name", f"Aish-v{version}-Windows-x64",
+    options = ["--noconfirm", "--onefile", "--windowed", "--noupx", "--log-level", "INFO", "--name", f"Aish-v{version}-Windows-x64",
                "--distpath", str(Path(args.dist).resolve()), "--workpath", str(work), "--specpath", str(work),
                "--add-data", f"{root / 'assets'}{os.pathsep}assets",
                "--add-data", f"{root / 'aish-welcome-art.png'}{os.pathsep}."]
