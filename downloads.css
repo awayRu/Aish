@@ -57,7 +57,7 @@
   inset: 0 0 0 35%;
   mask-image: linear-gradient(90deg, transparent 1%, #000 45%);
 }
-.download-art .hero-art { width: 100%; height: 100%; background-position: 87% 13%; background-size: auto max(225%, 51rem); mask-image: none }
+.download-art .hero-art { width: 100%; height: 100%; background-position: 56% 7%; background-size: auto max(225%, 51rem); mask-image: none }
 .downloads-copy { padding: clamp(1.35rem, 5vw, 3.4rem); max-width: 32rem }
 .release-version { color: var(--accent); font-size: .88rem; font-weight: 650; letter-spacing: .03em }
 .downloads-copy h1 { margin: .5rem 0 .75rem; font-size: clamp(2.6rem, 6vw, 4.45rem); line-height: 1; letter-spacing: -.065em }
@@ -103,7 +103,7 @@
   .downloads-header, .downloads-main { width: calc(100% - 2rem) }
   .downloads-hero { min-height: 18rem; align-items: end }
   .download-art { inset: 0; mask-image: linear-gradient(#000, #0008 30%, transparent 82%) }
-  .download-art .hero-art { background-position: 91% 8%; background-size: auto 45rem }
+  .download-art .hero-art { background-position: 60% 8%; background-size: auto 45rem }
   .downloads-copy { padding-top: 5.25rem }
   .platforms { grid-template-columns: 1fr; gap: .75rem }
   .platform-download { width: 100% }
