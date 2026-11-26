@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -51,6 +51,8 @@ jobs:
           pip install buildozer
 
       - name: Build APK
+        env:
+          BUILD_MODE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'debug' }}
         shell: bash
         run: |
           set +e
@@ -58,7 +60,7 @@ jobs:
           unset ANDROID_HOME ANDROID_SDK_ROOT ANDROID_NDK_HOME ANDROID_NDK_ROOT
           unset PIP_NO_USE_PEP517 PIP_NO_BUILD_ISOLATION
 
-          yes 2>/dev/null | buildozer -v android debug 2>&1 | tee buildozer_output.txt
+          yes 2>/dev/null | buildozer -v android "$BUILD_MODE" 2>&1 | tee buildozer_output.txt
 
           pipeline_status=("${PIPESTATUS[@]}")
           build_status="${pipeline_status[1]}"
@@ -137,9 +139,11 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          RELEASE_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+$ ]]
 
           mapfile -t APK_FILES < <(
             find bin -maxdepth 1 -type f -name '*.apk' -print | sort
@@ -166,20 +170,37 @@ jobs:
             exit 1
           }
 
-          SIGNED_APK="$RUNNER_TEMP/aichat-release-signed.apk"
+          BUILD_TOOLS="$(dirname "$APKSIGNER")"
+          ALIGNED_APK="$RUNNER_TEMP/aish-aligned.apk"
+          SIGNED_APK="bin/Aish-${RELEASE_TAG}-Android.apk"
+          "$BUILD_TOOLS/zipalign" -P 16 -f 4 "$APK" "$ALIGNED_APK"
 
           "$APKSIGNER" sign \
             --ks "$RUNNER_TEMP/aish-release.jks" \
             --ks-key-alias "$ANDROID_KEY_ALIAS" \
             --ks-pass "env:ANDROID_KEYSTORE_PASSWORD" \
             --key-pass "env:ANDROID_KEY_PASSWORD" \
-            --out "$SIGNED_APK" "$APK"
+            --out "$SIGNED_APK" "$ALIGNED_APK"
 
-          "$APKSIGNER" verify --verbose "$SIGNED_APK"
-          mv "$SIGNED_APK" "$APK"
-          "$APKSIGNER" verify --verbose "$APK"
-
-          echo "APK signed and verified: $APK"
+          "$BUILD_TOOLS/zipalign" -c -P 16 4 "$SIGNED_APK"
+          "$APKSIGNER" verify --verbose --print-certs "$SIGNED_APK" | tee "$RUNNER_TEMP/aish-signature.txt"
+          grep -Fx 'Signer #1 certificate SHA-256 digest: abde9d7f177f24046a534c1b155867edd7caeaf7a88f2b6fd921dd2d48cba3c5' "$RUNNER_TEMP/aish-signature.txt"
+          "$BUILD_TOOLS/aapt2" dump badging "$SIGNED_APK" > "$RUNNER_TEMP/aish-badging.txt"
+          grep -E "^package: name='org\.aichat\.aichat' versionCode='${RELEASE_TAG#v}' " "$RUNNER_TEMP/aish-badging.txt"
+          grep -Fx "minSdkVersion:'24'" "$RUNNER_TEMP/aish-badging.txt"
+          grep -E "^native-code: .*'arm64-v8a'" "$RUNNER_TEMP/aish-badging.txt"
+          grep -E "^native-code: .*'armeabi-v7a'" "$RUNNER_TEMP/aish-badging.txt"
+          if grep -Fxq 'application-debuggable' "$RUNNER_TEMP/aish-badging.txt"; then
+            echo 'Refusing to publish a debuggable APK.'
+            exit 1
+          fi
+          "$BUILD_TOOLS/aapt2" dump xmltree "$SIGNED_APK" --file AndroidManifest.xml > "$RUNNER_TEMP/aish-manifest.txt"
+          if grep -Eq 'android:testOnly\([^)]*\)=true' "$RUNNER_TEMP/aish-manifest.txt"; then
+            echo 'Refusing to publish a test-only APK.'
+            exit 1
+          fi
+          python .github/scripts/verify_android_apk.py "$SIGNED_APK"
+          rm -- "$APK" "$RUNNER_TEMP/aish-release.jks"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
@@ -198,12 +219,51 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+  verify-install:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: apk
+          path: bin
+      - name: Enable the Android emulator on the runner
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install and launch on Android 15
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          script: bash .github/scripts/check_android_install.sh "bin/Aish-${RELEASE_TAG}-Android.apk"
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify-install
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: apk
+          path: bin
+      - name: Publish verified APK to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          name: AI Chat ${{ github.ref_name }}
+          name: Aish ${{ github.ref_name }}
+          prerelease: false
+          make_latest: true
           generate_release_notes: true
-          files: bin/*.apk
+          fail_on_unmatched_files: true
+          files: bin/Aish-${{ github.ref_name }}-Android.apk
