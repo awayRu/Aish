@@ -9,8 +9,8 @@ source.exclude_dirs = .github,android_recipes
 source.exclude_patterns = android_build_hook.py,windows_launcher.py
 
 # Public app release version and Android in-place update code.
-version = 1.47
-android.numeric_version = 47
+version = 1.48
+android.numeric_version = 48
 
 requirements = python3,kivy==2.1.0,pyjnius,certifi,libwebp==1.6.0,pillow,pypdf
 
