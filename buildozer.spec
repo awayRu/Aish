@@ -4,13 +4,14 @@ package.name = aichat
 package.domain = org.aichat
 
 source.dir = .
-source.include_exts = py,png,jpg,jpeg,webp,gif,kv,atlas
+source.include_exts = py,png,jpg,jpeg,webp,gif,kv,atlas,ttf,txt
+source.exclude_patterns = android_build_hook.py,android_recipes/*
 
 # Public app release version and Android in-place update code.
-version = 1.45
-android.numeric_version = 45
+version = 1.46
+android.numeric_version = 46
 
-requirements = python3,kivy==2.1.0,pyjnius,certifi,pillow,pypdf
+requirements = python3,kivy==2.1.0,pyjnius,certifi,libwebp==1.6.0,pillow,pypdf
 
 orientation = portrait
 fullscreen = 0
@@ -24,6 +25,8 @@ android.archs = arm64-v8a
 android.accept_sdk_license = True
 
 p4a.branch = v2024.01.21
+p4a.hook = android_build_hook.py
+p4a.local_recipes = android_recipes
 
 [buildozer]
 log_level = 2
