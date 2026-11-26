@@ -182,7 +182,9 @@ jobs:
 
           "$BUILD_TOOLS/zipalign" -c -P 16 4 "$SIGNED_APK"
           "$APKSIGNER" verify --verbose --print-certs "$SIGNED_APK" | tee "$RUNNER_TEMP/aish-signature.txt"
-          grep -Fx 'Signer #1 certificate SHA-256 digest: abde9d7f177f24046a534c1b155867edd7caeaf7a88f2b6fd921dd2d48cba3c5' "$RUNNER_TEMP/aish-signature.txt"
+          grep -Fx 'Number of signers: 1' "$RUNNER_TEMP/aish-signature.txt"
+          signer_digests=$(awk '/certificate SHA-256 digest:/ {print $NF}' "$RUNNER_TEMP/aish-signature.txt" | sort -u)
+          test "$signer_digests" = "abde9d7f177f24046a534c1b155867edd7caeaf7a88f2b6fd921dd2d48cba3c5"
           "$BUILD_TOOLS/aapt2" dump badging "$SIGNED_APK" > "$RUNNER_TEMP/aish-badging.txt"
           grep -E "^package: name='org\.aichat\.aichat' versionCode='${RELEASE_TAG#v}' " "$RUNNER_TEMP/aish-badging.txt"
           grep -Ex "(minSdkVersion|sdkVersion):'24'" "$RUNNER_TEMP/aish-badging.txt"
