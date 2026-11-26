@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="./aish-v5.css">
 <link rel="stylesheet" href="./extras-v5.css">
 <link rel="stylesheet" href="./downloads.css?v=2">
-<script type="module" src="./aish-v5.mjs"></script>
+<script type="module" src="./aish-v5.mjs?v=2"></script>
 </head>
 <body>
 <a href="#main" class="skip">Перейти к содержимому</a>
@@ -56,8 +56,8 @@
         <button type="button" class="icon open-menu" id="open-menu" aria-label="Открыть меню" aria-expanded="false" aria-controls="sidebar"><svg class="glyph" aria-hidden="true"><use href="#i-menu"/></svg></button>
         <div class="current-title" id="current-title">Новый чат</div>
         <details class="model">
-          <summary>Qwen3.8 Flash<svg class="glyph" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
-          <p>Сообщения чата обрабатывает <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>.</p>
+          <summary>Автовыбор модели<svg class="glyph" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+          <p>Основная модель — Gemma 4 на <a href="https://www.ovhcloud.com/" target="_blank" rel="noopener noreferrer">OVHcloud</a>. Если она недоступна, запрос обрабатывает Qwen через <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a>.</p>
         </details>
         <a class="top-download" href="./download.html"><svg class="glyph" aria-hidden="true"><use href="#i-download"/></svg><span>Скачать<span class="sr-only"> Aish</span></span></a>
       </header>
@@ -91,7 +91,7 @@
             <button type="button" id="stop" class="send" aria-label="Остановить ответ" title="Остановить ответ" hidden>■</button>
           </form>
           <div class="compose-foot">
-            <span>Запросы обрабатывает <a href="https://aihorde.net/" target="_blank" rel="noopener noreferrer">AI Horde</a></span>
+            <span>Модели работают через OVHcloud и AI Horde</span>
             <span class="key-hint">Enter для отправки</span>
           </div>
         </div>

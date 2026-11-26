@@ -1,4 +1,4 @@
-import { complete } from "./provider-v4.mjs";
+import { complete } from "./provider-v4.mjs?v=2";
 import { renderReply } from "./format-v4.mjs";
 import { initExtras } from "./extras-v5.mjs";
 
@@ -296,7 +296,7 @@ async function answer(previous = null) {
   id("send").hidden = true;
   id("stop").hidden = false;
   history();
-  setStatus("Запрос отправлен. Ждём модель AI Horde…");
+  setStatus("Запрос отправлен. Ждём модель…");
   const turn = addTurn("assistant");
   turn.content.textContent = "Жду ответа…";
   bottom();
@@ -315,7 +315,7 @@ async function answer(previous = null) {
   } catch (error) {
     if (timedOut) errorMessage = "Модель не ответила вовремя. Бесплатная очередь может быть перегружена.";
     else if (controller.signal.aborted) errorMessage = "Генерация остановлена.";
-    else if (error instanceof TypeError) errorMessage = "Не удалось связаться с AI Horde. Проверь подключение и попробуй снова.";
+    else if (error instanceof TypeError) errorMessage = "Не удалось связаться с моделями. Проверь подключение и попробуй снова.";
     else errorMessage = error.message || "Не удалось получить ответ.";
   } finally {
     clearTimeout(timeout);
