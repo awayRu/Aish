@@ -31,6 +31,7 @@ if (ASSETS / "Inter-Regular.ttf").is_file() and (ASSETS / "Inter-Bold.ttf").is_f
 PALETTE = {key: tuple(get_color_from_hex(value)) for key, value in {
     "bg_top": "#051412", "bg_bot": "#041210",
     "panel": "#0a1c1a", "panel2": "#102725", "panel3": "#243f39",
+    "settings_panel": "#091817",
     "text": "#f8f8f8", "text_dim": "#c3ccca", "text_faint": "#9eaeaa",
     "accent": "#63c69e", "accent_text": "#06251b", "accent_soft": "#133c31",
     "bubble_me": "#164837", "bubble_ai": "#0e201e", "bubble_text": "#f8f8f8",
@@ -505,6 +506,40 @@ class Glyph(Widget):
                      (13, 19), (16, 17), (17, 14), (20, 13), (22, 10), (21, 7), (18, 6), (7, 6))
             elif name == "lightning":
                 path((14, 22), (4, 10), (11, 10), (10, 2), (20, 14), (13, 14), (14, 22))
+            elif name == "brain":
+                path((12, 5), (9, 3), (5, 5), (5, 8), (2, 11), (3, 15), (6, 16),
+                     (6, 19), (9, 21), (12, 19), (15, 21), (18, 19), (18, 16), (21, 15),
+                     (22, 11), (19, 8), (19, 5), (15, 3), (12, 5), (12, 19))
+                path((6, 16), (9, 14), (9, 11), (6, 10))
+                path((18, 16), (15, 14), (15, 11), (18, 10))
+            elif name == "cpu":
+                rect(5, 5, 14, 14, 2)
+                rect(9, 9, 6, 6, 1)
+                for offset in (8, 12, 16):
+                    path((offset, 2), (offset, 5))
+                    path((offset, 19), (offset, 22))
+                    path((2, offset), (5, offset))
+                    path((19, offset), (22, offset))
+            elif name == "palette":
+                path((12, 3), (7, 4), (3, 8), (2, 13), (4, 18), (8, 21), (15, 22),
+                     (19, 20), (22, 16), (22, 12), (20, 9), (16, 9), (13, 8), (13, 5), (12, 3))
+                for px, py in ((6, 12), (9, 17), (15, 18), (18, 14)):
+                    circle(px, py, 1.1, True)
+            elif name == "keyboard":
+                rect(2, 5, 20, 14, 2)
+                for py in (10, 14):
+                    for px in (6, 10, 14, 18):
+                        circle(px, py, .8, True)
+                path((9, 8), (15, 8))
+            elif name == "bell":
+                path((3, 6), (6, 10), (6, 15), (8, 19), (12, 21), (16, 19), (18, 15),
+                     (18, 10), (21, 6), (3, 6))
+                path((9, 4), (10, 2), (14, 2), (15, 4))
+            elif name == "type":
+                path((2, 6), (6, 16), (10, 6))
+                path((3.5, 10), (8.5, 10))
+                path((11, 6), (16.5, 20), (22, 6))
+                path((13, 11), (20, 11))
             elif name == "text":
                 path((4, 18), (20, 18))
                 path((4, 12), (17, 12))

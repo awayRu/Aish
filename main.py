@@ -4584,14 +4584,17 @@ class ChatRoot(BoxLayout):
     def _mobile_heading(text):
         return make_label(text, 14, "text_dim", bold=True, size_hint_y=None, height=dp(27))
 
-    def _mobile_card(self, label, icon, callback, subtitle="", selected=False, grouped=False, trailing=""):
+    def _mobile_card(self, label, icon, callback, subtitle="", selected=False, grouped=False, trailing="",
+                     *, icon_badge=True):
         fill = T("accent_soft") if selected else (0, 0, 0, 0) if grouped else T("panel")
         border = (0, 0, 0, 0) if grouped else T("panel3")
         row = CardButton(callback, fill, border, radius=12, size_hint_y=None, height=dp(61 if grouped else 68),
                          spacing=dp(11), padding=(dp(12), dp(9), dp(12), dp(9)))
-        glyph = Glyph(icon, T("accent"), icon_size=21, size_hint_x=None, width=dp(39))
+        glyph = Glyph(icon, T("accent" if icon_badge else "text"), icon_size=21,
+                      size_hint_x=None, width=dp(39))
         row.add_widget(glyph)
-        surface(glyph, T("accent_soft"), radius=11)
+        if icon_badge:
+            surface(glyph, T("accent_soft"), radius=11)
         names = BoxLayout(orientation="vertical", spacing=dp(2))
         names.add_widget(make_label(label, 14, bold=True, shorten=True, shorten_from="right",
                                     size_hint_y=.57 if subtitle else 1))
@@ -4607,10 +4610,10 @@ class ChatRoot(BoxLayout):
                                  icon_size=17, size_hint_x=None, width=dp(19)))
         return row
 
-    def _mobile_group(self, page, items):
+    def _mobile_group(self, page, items, *, color=None):
         group = BoxLayout(orientation="vertical", size_hint_y=None)
         group.bind(minimum_height=group.setter("height"))
-        surface(group, T("panel"), T("panel3"), radius=15)
+        surface(group, color or T("panel"), T("panel3"), radius=15)
         for index, item in enumerate(items):
             if index:
                 line = Widget(size_hint_y=None, height=dp(1))
@@ -5004,9 +5007,7 @@ class ChatRoot(BoxLayout):
 
         def switch_item(label, icon, checked, changed):
             row = BoxLayout(size_hint_y=None, height=dp(51), padding=(dp(12), dp(6)), spacing=dp(11))
-            glyph = Glyph(icon, T("accent"), icon_size=19, size_hint_x=None, width=dp(39))
-            surface(glyph, T("accent_soft"), radius=11)
-            row.add_widget(glyph)
+            row.add_widget(Glyph(icon, T("text"), icon_size=22, size_hint_x=None, width=dp(39)))
             row.add_widget(make_label(label, 14, bold=True))
             row.add_widget(PremiumSwitch(active=checked, on_change=changed, pos_hint={"center_y": .5}))
             return row
@@ -5079,24 +5080,26 @@ class ChatRoot(BoxLayout):
         page.add_widget(profile)
         main_settings = [
             self._mobile_card("Модель нейросети", "sliders", lambda: self.open_model_picker(self.open_mobile_settings),
-                              self._model_label(), grouped=True),
-            self._mobile_card("Тема оформления", "sliders", choose_theme,
-                              "Тёмная (изумрудная)" if STATE["theme"] == "aurora" else TV("name"), grouped=True),
-            self._mobile_card("Размер текста", "text", choose_font, fonts[STATE["font_size"]], grouped=True),
-            switch_item("Подсказки клавиатуры", "text", STATE["keyboard_suggestions"],
+                              self._model_label(), grouped=True, icon_badge=False),
+            self._mobile_card("Тема оформления", "palette", choose_theme,
+                              "Тёмная (изумрудная)" if STATE["theme"] == "aurora" else TV("name"),
+                              grouped=True, icon_badge=False),
+            self._mobile_card("Размер текста", "type", choose_font, fonts[STATE["font_size"]],
+                              grouped=True, icon_badge=False),
+            switch_item("Подсказки клавиатуры", "keyboard", STATE["keyboard_suggestions"],
                         lambda enabled: preference("keyboard_suggestions", enabled)),
             *([switch_item("Голосовой ввод", "mic", STATE["voice_input_enabled"],
                            lambda enabled: preference("voice_input_enabled", enabled))]
               if kivy_platform == "android" else []),
             switch_item("Голосовой ответ", "volume", STATE["voice_out"],
                         lambda enabled: preference("voice_out", enabled)),
-            self._mobile_card("Память и данные", "history", self.open_mobile_data, grouped=True),
-            switch_item("Уведомления об обновлении", "cloud", STATE["update_notifications"],
+            self._mobile_card("Память и данные", "history", self.open_mobile_data, grouped=True, icon_badge=False),
+            switch_item("Уведомления об обновлении", "bell", STATE["update_notifications"],
                         lambda enabled: preference("update_notifications", enabled)),
         ]
         for item in main_settings:
             item.height = dp(51)
-        self._mobile_group(page, main_settings)
+        self._mobile_group(page, main_settings, color=T("settings_panel") if STATE["theme"] == "aurora" else None)
         self._mobile_group(page, [
             self._mobile_card("Визуальные эффекты", "studio", choose_effects,
                               effect_names[self._effects_level()], grouped=True),
@@ -5173,7 +5176,7 @@ class ChatRoot(BoxLayout):
             back()
 
         primary = (
-            ("Qwen3.8 Flash", "bolt", "AI Horde · текст и код"),
+            ("Qwen3.8 Flash", "lightning", "AI Horde · текст и код"),
             ("Gemma 4", "brain", "OVHcloud · тексты и объяснения"),
             ("GPT-OSS 20B", "cpu", "OVHcloud · задачи и код"),
         )
