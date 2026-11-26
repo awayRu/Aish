@@ -1,4 +1,4 @@
-name: Live chat and photo recognition
+name: Live model and image checks
 on:
   push:
     branches: [qa/v50-services]
@@ -15,3 +15,29 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install 'kivy==2.3.1' pillow certifi pypdf requests
       - run: xvfb-run -a python .github/scripts/live_services.py
+  generation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pillow
+      - name: Decode the generated image
+        run: |
+          python - <<'PY'
+          import ssl
+          import tempfile
+          from pathlib import Path
+          from threading import Event
+          from PIL import Image
+          from aish_media import create_picture
+          with tempfile.TemporaryDirectory() as tmp:
+              path = create_picture("A blue coffee mug on a wooden table", "512", tmp, ssl.create_default_context(), Event())
+              with Image.open(path) as image:
+                  image.load()
+                  assert image.size == (512, 512) and image.format == "PNG"
+                  assert image.convert("L").getextrema()[0] < image.convert("L").getextrema()[1]
+              print("Primary generation produced a valid 512 x 512 PNG,", Path(path).stat().st_size, "bytes")
+          PY
