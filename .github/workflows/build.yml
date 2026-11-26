@@ -245,9 +245,38 @@ jobs:
           arch: x86_64
           script: bash .github/scripts/check_android_install.sh "bin/Aish-${RELEASE_TAG}-Android.apk"
 
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - name: Install Windows build requirements
+        run: python -m pip install 'kivy[base]==2.3.1' 'pyinstaller==6.16.0' pillow pypdf certifi
+      - name: Verify streaming regressions
+        run: |
+          $env:AISH_DATA_DIR = Join-Path $env:RUNNER_TEMP 'aish-stream-tests'
+          $env:KIVY_HOME = Join-Path $env:AISH_DATA_DIR 'kivy'
+          python .github/scripts/test_streaming.py
+      - name: Package Aish for Windows
+        run: python .github/scripts/build_windows.py
+      - name: Launch the packaged application
+        run: |
+          $files = @(Get-ChildItem bin -Filter 'Aish-v*-Windows-x64.exe')
+          if ($files.Count -ne 1) { throw 'Expected one Windows x64 package' }
+          python .github/scripts/check_windows.py $files[0].FullName
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: bin/*.exe
+          if-no-files-found: error
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: verify-install
+    needs: [verify-install, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -256,7 +285,11 @@ jobs:
         with:
           name: apk
           path: bin
-      - name: Stage verified APK in a draft release
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows
+          path: bin
+      - name: Stage Android and Windows packages in a draft release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -266,4 +299,6 @@ jobs:
           draft: true
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: bin/Aish-${{ github.ref_name }}-Android.apk
+          files: |
+            bin/Aish-${{ github.ref_name }}-Android.apk
+            bin/Aish-${{ github.ref_name }}-Windows-x64.exe
