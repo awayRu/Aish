@@ -9,6 +9,7 @@ import re
 import sys
 
 from PyInstaller.__main__ import run
+from kivy.tools.packaging.pyinstaller_hooks import hookspath
 
 
 def build():
@@ -26,6 +27,13 @@ def build():
                "--distpath", str(Path(args.dist).resolve()), "--workpath", str(work), "--specpath", str(work),
                "--add-data", f"{root / 'assets'}{os.pathsep}assets",
                "--add-data", f"{root / 'aish-welcome-art.png'}{os.pathsep}."]
+    # The default PyInstaller Kivy hook opens a GL window to detect providers.
+    # Specify the actual Windows providers so the package also builds on CI without graphics.
+    for path in hookspath():
+        options.extend(("--additional-hooks-dir", path))
+    for provider in ("window.window_sdl2", "text.text_sdl2", "image.img_sdl2", "image.img_pil",
+                     "image.img_tex", "clipboard.clipboard_winctypes", "clipboard.clipboard_sdl2"):
+        options.extend(("--hidden-import", "kivy.core." + provider))
     for provider in ("sdl2", "glew", "angle"):
         dependency = importlib.import_module(f"kivy_deps.{provider}")
         paths = set(map(Path, dependency.dep_bins))
