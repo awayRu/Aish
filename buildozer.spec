@@ -9,14 +9,14 @@ source.exclude_dirs = .github,android_recipes
 source.exclude_patterns = android_build_hook.py,windows_launcher.py
 
 # Public app release version and Android in-place update code.
-version = 1.50
-android.numeric_version = 50
+version = 1.51
+android.numeric_version = 51
 
 # p4a installs pip requirements on the build host with --no-deps.
 # These universal wheels avoid host-native extensions and supply the Requests codecs.
-requirements = chardet==5.2.0,charset-normalizer==2.1.1,python3,kivy==2.1.0,pyjnius,certifi,libwebp==1.6.0,pillow,pypdf
+requirements = chardet==5.2.0,charset-normalizer==2.1.1,python3,kivy==2.1.0,pyjnius,plyer,certifi,libwebp==1.6.0,pillow,pypdf
 
-orientation = portrait
+orientation = portrait, landscape
 fullscreen = 0
 
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE

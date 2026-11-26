@@ -1,15 +1,17 @@
 """Native controls and artwork rendering for the Aish interface."""
 from functools import lru_cache
-from math import cos, pi, sin
+from math import cos, exp, pi, sin
 from pathlib import Path
+from weakref import WeakSet
 
+from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
 from kivy.core.text import LabelBase
-from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Ellipse, Line, PopMatrix, PushMatrix, Rectangle, RoundedRectangle, Scale
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
-from kivy.properties import StringProperty
+from kivy.properties import NumericProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -27,16 +29,160 @@ if (ASSETS / "Inter-Regular.ttf").is_file() and (ASSETS / "Inter-Bold.ttf").is_f
                        fn_bold=str(ASSETS / "Inter-Bold.ttf"))
 
 PALETTE = {key: tuple(get_color_from_hex(value)) for key, value in {
-    "bg_top": "#10292a", "bg_bot": "#0c2223",
-    "panel": "#122d2e", "panel2": "#1b3b39", "panel3": "#31504d",
-    "text": "#eff8f4", "text_dim": "#b9d4cc", "text_faint": "#91aea6",
-    "accent": "#a0f5d6", "accent_text": "#123631", "accent_soft": "#214b43",
-    "bubble_me": "#1a433b", "bubble_ai": "#172f30", "bubble_text": "#eff8f4",
-    "chip": "#143230", "chip_text": "#d2ebe2", "avatar_me": "#24584e", "avatar_ai": "#245349",
-    "ring_bg": "#294745", "danger": "#ff9c9e", "danger_bg": "#392227",
+    "bg_top": "#071816", "bg_bot": "#041210",
+    "panel": "#0a1c1a", "panel2": "#102725", "panel3": "#243f39",
+    "text": "#f8f8f8", "text_dim": "#c3ccca", "text_faint": "#9eaeaa",
+    "accent": "#63c69e", "accent_text": "#06251b", "accent_soft": "#133c31",
+    "bubble_me": "#164837", "bubble_ai": "#0e201e", "bubble_text": "#f8f8f8",
+    "chip": "#0e2420", "chip_text": "#c4e8dc", "avatar_me": "#215742", "avatar_ai": "#0e392c",
+    "ring_bg": "#315a4c", "danger": "#ff9c9e", "danger_bg": "#392227",
     "success": "#9ceecf", "success_bg": "#1a4238", "star": "#ffd080", "star_bg": "#342b1c",
     "online": "#9ceecf", "shadow": "#0000004d",
 }.items()}
+MINT_LIGHT = tuple(get_color_from_hex("#a7f2d8"))
+
+
+def _rgba_texture(width, height, pixels):
+    texture = Texture.create(size=(width, height), colorfmt="rgba")
+    texture.blit_buffer(bytes(pixels), colorfmt="rgba", bufferfmt="ubyte")
+    return texture
+
+
+@lru_cache(maxsize=1)
+def jade_waves():
+    """Two soft refracted ribbons with transparent edges for the jade screens."""
+    width, height = 320, 150
+    pixels = bytearray()
+    for row in range(height):
+        y = row / (height - 1)
+        for column in range(width):
+            x = column / (width - 1)
+            ridge = .38 + .14 * sin(x * 7.8 - .45) + x * .31
+            distance = y - ridge
+            rim = exp(-((distance - .009) / .016) ** 2)
+            halo = exp(-((distance + .035) / .091) ** 2)
+            broad = exp(-((distance + .105) / .16) ** 2)
+            reflection = exp(-((distance + .23 + .06 * sin(x * 11)) / .042) ** 2)
+            focus = .32 + .68 * (.5 + .5 * sin(x * 10.5 + .7))
+            edge = min(1, y * 8, (1 - y) * 8)
+            alpha = (.30 * rim + .44 * halo + .18 * broad + .08 * reflection) * focus * edge
+            pixels.extend((round(32 + 116 * rim), round(130 + 103 * rim),
+                           round(100 + 110 * rim), round(min(1, alpha) * 255)))
+    return _rgba_texture(width, height, pixels)
+
+
+@lru_cache(maxsize=1)
+def _glass_reflection():
+    pixels = bytearray()
+    for row in range(32):
+        y = row / 31
+        for column in range(32):
+            x = column / 31
+            light = .63 * exp(-((1 - y) / .16) ** 2) * (.45 + .55 * (1 - x))
+            light += .49 * exp(-(y / .12) ** 2) * x
+            pixels.extend((216, 255, 239, round(light * 255)))
+    return _rgba_texture(32, 32, pixels)
+
+
+_hoverable = WeakSet()
+_pointer_bound = False
+_effects_level = "full"
+
+
+@lru_cache(maxsize=1)
+def _android_haptic():
+    from android.runnable import run_on_ui_thread
+    from jnius import autoclass
+
+    @run_on_ui_thread
+    def tick():
+        try:
+            activity = autoclass("org.kivy.android.PythonActivity").mActivity
+            activity.getWindow().getDecorView().performHapticFeedback(3)
+        except Exception:
+            pass
+
+    return tick
+
+
+def set_effects(level):
+    global _effects_level
+    _effects_level = level
+
+
+def _pointer_move(_window, point):
+    for control in tuple(_hoverable):
+        hovered = bool(control.get_root_window() and control.opacity > 0 and not control.disabled
+                       and control.collide_point(*control.to_widget(*point)))
+        if control._hovered != hovered:
+            control._hovered = hovered
+            control._press_effect()
+
+
+class PressFeedback:
+    scale_feedback = NumericProperty(1)
+    glow_feedback = NumericProperty(0)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._hovered = False
+        with self.canvas.before:
+            PushMatrix()
+            self._press_scale = Scale(1, 1, 1, origin=self.center)
+        with self.canvas.after:
+            self._press_ink = Color(*MINT_LIGHT[:3], 0)
+            self._press_reflection = RoundedRectangle(texture=_glass_reflection(), radius=[dp(12)])
+            PopMatrix()
+        self.bind(pos=self._place_feedback, size=self._place_feedback, state=self._press_effect,
+                  parent=self._track_pointer, scale_feedback=self._paint_feedback,
+                  glow_feedback=self._paint_feedback)
+        if platform == "android":
+            self.bind(on_press=self._touch_feedback)
+        self._place_feedback()
+
+    def _place_feedback(self, *_):
+        self._press_scale.origin = self.center
+        self._press_reflection.pos = self.pos
+        self._press_reflection.size = self.size
+
+    def _track_pointer(self, _widget, parent):
+        if platform != "win":
+            return
+        global _pointer_bound
+        if parent is None:
+            _hoverable.discard(self)
+            self._hovered = False
+            return
+        if not _pointer_bound:
+            from kivy.core.window import Window
+            Window.bind(mouse_pos=_pointer_move)
+            _pointer_bound = True
+        _hoverable.add(self)
+
+    def _paint_feedback(self, *_):
+        self._press_scale.x = self._press_scale.y = self.scale_feedback
+        self._press_ink.a = self.glow_feedback
+
+    @staticmethod
+    def _touch_feedback(*_):
+        if _effects_level != "off":
+            try:
+                _android_haptic()()
+            except ImportError:
+                pass
+
+    def _press_effect(self, *_):
+        down = self.state == "down"
+        target = .972 if down else 1
+        glow = .22 if down else .09 if self._hovered else 0
+        Animation.cancel_all(self, "scale_feedback", "glow_feedback")
+        if _effects_level == "off":
+            self.scale_feedback = 1
+            self.glow_feedback = 0
+            return
+        duration = .12 if down else .18
+        Animation(scale_feedback=target if _effects_level == "full" else 1,
+                  glow_feedback=glow, d=duration, t="out_quad").start(self)
 
 
 @lru_cache(maxsize=4)
@@ -56,9 +202,27 @@ def _artwork_fade(rgb):
             x = column / (side - 1)
             horizontal = fade(x, .13) * fade(1 - x, .13)
             pixels.extend((*rgb, round(255 * (1 - horizontal * vertical))))
-    texture = Texture.create(size=(side, side), colorfmt="rgba")
-    texture.blit_buffer(bytes(pixels), colorfmt="rgba", bufferfmt="ubyte")
-    return texture
+    return _rgba_texture(side, side, pixels)
+
+
+@lru_cache(maxsize=1)
+def _emblem_texture(path):
+    """Blend the supplied opaque PNG into the app without baking in a background color."""
+    from PIL import Image
+
+    with Image.open(path) as source:
+        image = source.convert("RGBA").transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+    width, height = image.size
+    data = bytearray(image.tobytes())
+    for row in range(height):
+        y = row / (height - 1)
+        for col in range(width):
+            x = col / (width - 1)
+            edge = min(1, x / .18, (1 - x) / .18, y / .22, (1 - y) / .16)
+            base = (row * width + col) * 4
+            strength = max(.04, min(1, (max(data[base:base + 3]) - 35) / 76))
+            data[base + 3] = round(255 * strength * edge * edge * (3 - 2 * edge))
+    return _rgba_texture(width, height, data)
 
 
 class GlassArtwork(Widget):
@@ -67,10 +231,11 @@ class GlassArtwork(Widget):
     def __init__(self, path, background=None, muted=False, **kwargs):
         super().__init__(**kwargs)
         image_path = Path(path)
-        self.texture = CoreImage(str(image_path)).texture
+        emblem = image_path.name == "aish-premium-symbol.png"
+        self.texture = _emblem_texture(image_path) if emblem else CoreImage(str(image_path)).texture
         backdrop = PALETTE["bg_top"] if background is None else background
         rgb = tuple(round(channel * 255) for channel in backdrop[:3])
-        self._fade = _artwork_fade(rgb)
+        self._fade = None if emblem else _artwork_fade(rgb)
         self._tick = None
         self._phase = 0.0
         self._alpha = .9 if muted else 1
@@ -79,7 +244,7 @@ class GlassArtwork(Widget):
             self.ink = Color(1, 1, 1, self._alpha)
             self.picture = Rectangle(texture=self.texture, tex_coords=self._art_coords)
             Color(1, 1, 1, 1)
-            self.edge = Rectangle(texture=self._fade)
+            self.edge = Rectangle(texture=self._fade) if self._fade is not None else None
         self.bind(pos=self.layout_art, size=self.layout_art, parent=self._parent_changed)
         self.layout_art()
 
@@ -106,8 +271,9 @@ class GlassArtwork(Widget):
         scale = min(self.width / source_width, self.height / source_height)
         width, height = source_width * scale, source_height * scale
         pos = (self.x + (self.width - width) / 2, self.y + (self.height - height) / 2)
-        self.picture.pos = self.edge.pos = pos
-        self.picture.size = self.edge.size = (width, height)
+        self.picture.pos, self.picture.size = pos, (width, height)
+        if self.edge is not None:
+            self.edge.pos, self.edge.size = self.picture.pos, self.picture.size
 
     def _parent_changed(self, _widget, parent):
         if parent is None:
@@ -189,6 +355,33 @@ class Glyph(Widget):
             elif name == "menu":
                 for level in (6, 12, 18):
                     path((3, level), (21, level))
+            elif name == "home":
+                path((2, 11), (12, 21), (22, 11))
+                path((5, 13), (5, 3), (10, 3), (10, 9), (14, 9), (14, 3), (19, 3), (19, 13))
+            elif name == "profile":
+                circle(12, 16, 4)
+                path((4, 3), (4, 6), (7, 9), (17, 9), (20, 6), (20, 3), (4, 3))
+            elif name == "dot":
+                circle(12, 12, 5, filled=True)
+            elif name == "camera":
+                path((5, 17), (8, 17), (10, 20), (15, 20), (17, 17), (20, 17),
+                     (22, 15), (22, 5), (20, 3), (4, 3), (2, 5), (2, 15), (4, 17), (5, 17))
+                circle(12, 10, 4)
+            elif name == "trash":
+                path((3, 18), (21, 18))
+                path((9, 18), (9, 21), (15, 21), (15, 18))
+                path((6, 16), (7, 3), (17, 3), (18, 16))
+                path((10, 14), (10, 7))
+                path((14, 14), (14, 7))
+            elif name == "volume":
+                for bar, length in enumerate((5, 12, 18, 10, 5)):
+                    path((4 + bar * 4, 12 - length / 2), (4 + bar * 4, 12 + length / 2))
+            elif name == "share":
+                path((6, 12), (17, 18))
+                path((6, 12), (17, 6))
+                circle(5, 12, 2.6)
+                circle(19, 19, 2.6)
+                circle(19, 5, 2.6)
             elif name == "paperclip":
                 path((8, 13), (14, 19), (17, 20), (20, 18), (20, 15), (9, 4),
                      (6, 3), (3, 5), (3, 8), (14, 19))
@@ -320,6 +513,10 @@ def panel(widget, color, rim=None, radius=14, inset=0):
     with widget.canvas.before:
         fill = Color(*color)
         body = RoundedRectangle(radius=[dp(radius)])
+        glare = None
+        if color[3] and (rim or color in PALETTE.values()):
+            Color(*MINT_LIGHT[:3], .10 if color[0] < .2 else .19)
+            glare = RoundedRectangle(texture=_glass_reflection())
         outline = Color(*rim) if rim else None
         border = Line(width=dp(.60)) if rim else None
 
@@ -330,6 +527,8 @@ def panel(widget, color, rim=None, radius=14, inset=0):
         corner = min(dp(radius), min(size) / 2)
         body.pos, body.size = pos, size
         body.radius = [corner]
+        if glare is not None:
+            glare.pos, glare.size, glare.radius = pos, size, [corner]
         if border:
             border.rounded_rectangle = (*pos, *size, corner)
 
@@ -355,7 +554,7 @@ def hairline(widget, color, top=True, margin=0):
     place()
 
 
-class IconAction(ButtonBehavior, BoxLayout):
+class IconAction(PressFeedback, ButtonBehavior, BoxLayout):
     """Icon or icon-and-text action with a stable touch target."""
     text = StringProperty("")
 
@@ -392,6 +591,12 @@ class IconAction(ButtonBehavior, BoxLayout):
     def _update_caption(self, _button, value):
         self.caption.text = value
 
+    def on_touch_down(self, touch):
+        # Hidden composer actions overlap the compact input field.
+        if self.opacity == 0:
+            return False
+        return super().on_touch_down(touch)
+
     def _style(self, *_):
         tint = self.tint
         clear = (0, 0, 0, 0)
@@ -399,7 +604,7 @@ class IconAction(ButtonBehavior, BoxLayout):
             "quiet": (clear, clear, tint("text_dim")),
             "outline": (tint("panel"), tint("panel3"), tint("text")),
             "pill": (tint("chip"), tint("panel3"), tint("chip_text")),
-            "solid": (tint("accent"), clear, tint("accent_text")),
+            "solid": (tint("accent"), tint("accent"), tint("accent_text")),
             "danger": (tint("danger_bg"), tint("danger"), tint("danger")),
         }[self.variant]
         if self.disabled:
@@ -415,7 +620,7 @@ class IconAction(ButtonBehavior, BoxLayout):
             self.callback()
 
 
-class CardButton(ButtonBehavior, BoxLayout):
+class CardButton(PressFeedback, ButtonBehavior, BoxLayout):
     def __init__(self, callback, color, border, radius=17, **kwargs):
         super().__init__(**kwargs)
         self.callback = callback
@@ -432,7 +637,7 @@ class CardButton(ButtonBehavior, BoxLayout):
             self.callback()
 
 
-class NavButton(ButtonBehavior, BoxLayout):
+class NavButton(PressFeedback, ButtonBehavior, BoxLayout):
     def __init__(self, title, icon, action, tint, **kwargs):
         super().__init__(orientation="vertical", padding=(0, dp(4), 0, dp(9)), **kwargs)
         self.tint = tint
@@ -445,12 +650,12 @@ class NavButton(ButtonBehavior, BoxLayout):
         self.add_widget(self.caption)
         with self.canvas.after:
             self.marker = Color(*tint("accent")[:3], 0)
-            self.line = RoundedRectangle(size=(dp(22), dp(2)), radius=[dp(1)])
+            self.line = RoundedRectangle(size=(dp(18), dp(2)), radius=[dp(1)])
         self.bind(pos=self.place, size=self.place, state=self._style)
         self.place()
 
     def place(self, *_):
-        self.line.pos = (self.x + self.width / 2 - dp(11), self.y + dp(5))
+        self.line.pos = (self.x + self.width / 2 - dp(9), self.y + dp(5))
 
     def _style(self, *_):
         ink = self.tint("accent") if self.active or self.state == "down" else self.tint("text_dim")
