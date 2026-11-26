@@ -36,6 +36,8 @@ import sqlite3
 import urllib.request
 import urllib.error
 import urllib.parse
+import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime as DT
 from html.parser import HTMLParser
 
@@ -46,6 +48,23 @@ UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 os.environ.setdefault("KIVY_NO_ARGS", "1")
 # Keep Kivy console logging enabled: startup errors must remain visible in Pydroid.
+
+# Android disallows copying archive timestamps to app-private files. Kivy 2.1
+# copies its desktop icon cache on first import using shutil.copytree.
+if os.environ.get("ANDROID_APP_PATH"):
+    from importlib.util import find_spec
+
+    app_path = Path(os.environ["ANDROID_APP_PATH"])
+    icon_cache = Path(os.environ.get("KIVY_HOME", app_path / ".kivy")) / "icon"
+    if not icon_cache.exists():
+        bundled_icons = Path(find_spec("kivy").origin).parent / "data" / "logo"
+        try:
+            icon_cache.mkdir(parents=True, exist_ok=True)
+            for icon in bundled_icons.iterdir():
+                if icon.is_file():
+                    shutil.copyfile(icon, icon_cache / icon.name)
+        except OSError as error:
+            print(f"Could not initialize the Kivy icon cache: {error}", file=sys.stderr)
 
 from kivy.app import App
 from kivy.clock import Clock
