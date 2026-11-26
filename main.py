@@ -43,7 +43,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "51"
+APP_VERSION = "52"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -3917,6 +3917,7 @@ class ChatRoot(BoxLayout):
         self.title_lbl.bind(text=boundary)
         self.status_lbl.bind(text=boundary)
         self.model_button.bind(text=boundary)
+        self.header_titles.bind(width=boundary)
         boundary()
         self.chat_layout.add_widget(header)
 
@@ -4014,10 +4015,21 @@ class ChatRoot(BoxLayout):
         measure = TextMeasure(font_name=UI_FONT, font_size=sp(12.5), bold=True)
         model_width, _ = measure.get_extents(self.model_button.text)
         welcome = self._welcome_panel is not None
-        model_slot.width = dp(101) if welcome else min(dp(158), max(dp(98), model_width + dp(49)))
-        self.header_balance.width = max(0, model_slot.width - self.menu_button.width - dp(7)) if welcome else 0
+        compact = not welcome and self.header_widget.width < dp(520)
+        model_slot.width = dp(101) if welcome else dp(40) if compact else min(dp(158), max(dp(98), model_width + dp(49)))
+        self.header_balance.width = max(0, model_slot.width - self.menu_button.width - dp(7)) if welcome or compact else 0
         self.header_emblem.width = dp(34) if welcome else 0
         self.header_brand.width = dp(100) if welcome else max(dp(48), self.header_titles.width - dp(8))
+        self.title_lbl.font_size = sp(17 if compact else 20)
+        self.model_button.caption.opacity = int(not compact)
+        self.model_button.glyph.size_hint_x = 1 if compact else None
+        if not compact:
+            self.model_button.glyph.width = dp(18)
+        self.model_button.padding = (0, 0, 0, 0) if compact else (dp(10), 0, dp(8), 0)
+        self.model_button.caption.size_hint_x = 0 if compact else 1
+        self.model_button.spacing = 0 if compact else dp(4)
+        self.model_button.glyph.name = "more" if compact else "down"
+        self.model_button.glyph.draw()
 
     def _build_desktop_sidebar(self):
         sidebar = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(258),

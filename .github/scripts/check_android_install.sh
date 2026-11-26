@@ -41,8 +41,8 @@ adb install --no-streaming "$apk"
 launch_and_check
 adb uninstall "$app"
 
-curl -fL --retry 3 -o "$previous" 'https://github.com/awayRu/Aish/releases/download/v50/Aish-v50-Android.apk'
-printf '%s  %s\n' 'fb6a3856357480c02b12ffb0f431080a86239c0951a5bad887d325cd779f3686' "$previous" | sha256sum -c -
+curl -fL --retry 3 -o "$previous" 'https://github.com/awayRu/Aish/releases/download/v51/Aish-v51-Android.apk'
+printf '%s  %s\n' 'e8112b341b0b7c675c2909177c5e3c0e88d1acc0eba2b7c00318573dc21d38ba' "$previous" | sha256sum -c -
 adb install --no-streaming "$previous"
 launch_and_check
 adb shell am force-stop "$app"
@@ -66,4 +66,4 @@ note_count=$(adb shell -T "sqlite3 -readonly $data/chat.db" <<<"SELECT COUNT(*) 
 [[ "$(adb shell cat "$data/images/upgrade-fixture.txt" | tr -d '\r')" == Aish-media-fixture ]]
 old_extension="/data/user/0/$app/files/app/_python_bundle/site-packages/chardet/_kernel.so"
 adb shell "test ! -e $old_extension"
-echo 'The v50 note and attachment survived replacement and startup.'
+echo 'The v51 note and attachment survived replacement and startup.'

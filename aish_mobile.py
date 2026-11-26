@@ -29,7 +29,7 @@ if (ASSETS / "Inter-Regular.ttf").is_file() and (ASSETS / "Inter-Bold.ttf").is_f
                        fn_bold=str(ASSETS / "Inter-Bold.ttf"))
 
 PALETTE = {key: tuple(get_color_from_hex(value)) for key, value in {
-    "bg_top": "#071816", "bg_bot": "#041210",
+    "bg_top": "#051412", "bg_bot": "#041210",
     "panel": "#0a1c1a", "panel2": "#102725", "panel3": "#243f39",
     "text": "#f8f8f8", "text_dim": "#c3ccca", "text_faint": "#9eaeaa",
     "accent": "#63c69e", "accent_text": "#06251b", "accent_soft": "#133c31",
