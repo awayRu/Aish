@@ -2100,7 +2100,7 @@ def db_sessions(archived=None):
     with DB_LOCK:
         query = """SELECT id,title,created,updated,pinned,archived,draft != '' AS has_draft,
                    COALESCE((SELECT substr(content, 1, 200) FROM messages
-                             WHERE session_id=sessions.id ORDER BY id DESC LIMIT 1), '') AS preview
+                             WHERE session_id=sessions.id AND role='user' ORDER BY id DESC LIMIT 1), '') AS preview
                    FROM sessions"""
         query += " ORDER BY pinned DESC, updated DESC, rowid DESC"
         rows = DB.execute(query).fetchall()
@@ -4014,7 +4014,7 @@ class ChatRoot(BoxLayout):
         measure = TextMeasure(font_name=UI_FONT, font_size=sp(12.5), bold=True)
         model_width, _ = measure.get_extents(self.model_button.text)
         welcome = self._welcome_panel is not None
-        model_slot.width = dp(89) if welcome else min(dp(158), max(dp(98), model_width + dp(49)))
+        model_slot.width = dp(101) if welcome else min(dp(158), max(dp(98), model_width + dp(49)))
         self.header_balance.width = max(0, model_slot.width - self.menu_button.width - dp(7)) if welcome else 0
         self.header_emblem.width = dp(34) if welcome else 0
         self.header_brand.width = dp(100) if welcome else max(dp(48), self.header_titles.width - dp(8))
@@ -4107,7 +4107,7 @@ class ChatRoot(BoxLayout):
         page = BoxLayout(orientation="vertical", size_hint_y=None)
         page.bind(minimum_height=page.setter("height"))
         if GLASS_ASSET.is_file():
-            self._welcome_art = GlassArtwork(GLASS_ASSET, T("bg_top"), size_hint_y=None, height=dp(244), zoom=1.23)
+            self._welcome_art = GlassArtwork(GLASS_ASSET, T("bg_top"), size_hint_y=None, height=dp(244), zoom=1.10)
             page.add_widget(self._welcome_art)
             self._resize_welcome()
             self._welcome_art.set_motion(self._motion_enabled())
@@ -4593,9 +4593,11 @@ class ChatRoot(BoxLayout):
         row.add_widget(glyph)
         surface(glyph, T("accent_soft"), radius=11)
         names = BoxLayout(orientation="vertical", spacing=dp(2))
-        names.add_widget(make_label(label, 14, bold=True, shorten=True, size_hint_y=.57 if subtitle else 1))
+        names.add_widget(make_label(label, 14, bold=True, shorten=True, shorten_from="right",
+                                    size_hint_y=.57 if subtitle else 1))
         if subtitle:
-            names.add_widget(make_label(subtitle, 11.5, "text_dim", shorten=True, size_hint_y=.43))
+            names.add_widget(make_label(subtitle, 11.5, "text_dim", shorten=True,
+                                        shorten_from="right", size_hint_y=.43))
         row.add_widget(names)
         if trailing:
             row.add_widget(make_label(trailing, 10.5, "text_dim", halign="right",
@@ -4995,7 +4997,7 @@ class ChatRoot(BoxLayout):
         fonts = {"small": "Маленький", "medium": "Обычный", "large": "Крупный", "xlarge": "Очень крупный"}
 
         def switch_item(label, icon, checked, changed):
-            row = BoxLayout(size_hint_y=None, height=dp(58), padding=(dp(12), dp(9)), spacing=dp(11))
+            row = BoxLayout(size_hint_y=None, height=dp(51), padding=(dp(12), dp(6)), spacing=dp(11))
             glyph = Glyph(icon, T("accent"), icon_size=19, size_hint_x=None, width=dp(39))
             surface(glyph, T("accent_soft"), radius=11)
             row.add_widget(glyph)
@@ -5065,9 +5067,11 @@ class ChatRoot(BoxLayout):
 
         profile = self._mobile_card("Aish", "asterisk", self.open_mobile_more,
                                     "Инструменты и данные приложения", selected=True)
-        profile.height = dp(76)
+        profile.height = dp(68)
+        profile.remove_widget(profile.children[-1])
+        profile.add_widget(GlassArtwork(GLASS_ASSET, size_hint_x=None, width=dp(43)), index=len(profile.children))
         page.add_widget(profile)
-        self._mobile_group(page, [
+        main_settings = [
             self._mobile_card("Модель нейросети", "sliders", lambda: self.open_model_picker(self.open_mobile_settings),
                               self._model_label(), grouped=True),
             self._mobile_card("Тема оформления", "sliders", choose_theme,
@@ -5078,15 +5082,20 @@ class ChatRoot(BoxLayout):
             *([switch_item("Голосовой ввод", "mic", STATE["voice_input_enabled"],
                            lambda enabled: preference("voice_input_enabled", enabled))]
               if kivy_platform == "android" else []),
-            self._mobile_card("Визуальные эффекты", "studio", choose_effects,
-                              effect_names[self._effects_level()], grouped=True),
-            switch_item("Потоковый вывод", "check", STATE["streaming"],
-                        lambda enabled: preference("streaming", enabled)),
             switch_item("Голосовой ответ", "volume", STATE["voice_out"],
                         lambda enabled: preference("voice_out", enabled)),
             self._mobile_card("Память и данные", "history", self.open_mobile_data, grouped=True),
             switch_item("Уведомления об обновлении", "cloud", STATE["update_notifications"],
                         lambda enabled: preference("update_notifications", enabled)),
+        ]
+        for item in main_settings:
+            item.height = dp(51)
+        self._mobile_group(page, main_settings)
+        self._mobile_group(page, [
+            self._mobile_card("Визуальные эффекты", "studio", choose_effects,
+                              effect_names[self._effects_level()], grouped=True),
+            switch_item("Потоковый вывод", "check", STATE["streaming"],
+                        lambda enabled: preference("streaming", enabled)),
         ])
         page.add_widget(popup_button("Все настройки", self.open_settings))
 

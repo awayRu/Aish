@@ -8,7 +8,7 @@ from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
 from kivy.core.text import LabelBase
-from kivy.graphics import Color, Ellipse, Line, PopMatrix, PushMatrix, Rectangle, RoundedRectangle, Scale
+from kivy.graphics import Canvas, Color, Ellipse, Line, PopMatrix, PushMatrix, Rectangle, RoundedRectangle, Scale
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty, StringProperty
@@ -517,13 +517,20 @@ class Glyph(Widget):
 
 def panel(widget, color, rim=None, radius=14, inset=0, luminous=False):
     """Attach a rounded surface and return its mutable fill color and outline."""
-    with widget.canvas.before:
+    canvas = widget.canvas.before
+    if isinstance(widget, TextInput):
+        # Kivy's TextInput sets its text color in canvas.before. Draw behind that
+        # rule so the glass outline cannot tint the search hint or entered text.
+        background = Canvas()
+        canvas.insert(0, background)
+        canvas = background
+    with canvas:
         fill = Color(*color)
         body = RoundedRectangle(radius=[dp(radius)])
         glare = None
         aura = []
         if luminous:
-            for width, alpha in ((8, .06), (5, .12), (2, .24)):
+            for width, alpha in ((6, .035), (4, .08), (2, .16)):
                 Color(*MINT_LIGHT[:3], alpha)
                 aura.append(Line(width=dp(width)))
         if color[3] and (rim or color in PALETTE.values()):
