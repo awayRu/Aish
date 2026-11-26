@@ -228,7 +228,7 @@ def _emblem_texture(path):
 class GlassArtwork(Widget):
     """Draw the reference's glass emblem without drawing the surrounding UI."""
 
-    def __init__(self, path, background=None, muted=False, **kwargs):
+    def __init__(self, path, background=None, muted=False, zoom=1, **kwargs):
         super().__init__(**kwargs)
         image_path = Path(path)
         emblem = image_path.name == "aish-premium-symbol.png"
@@ -239,6 +239,8 @@ class GlassArtwork(Widget):
         self._tick = None
         self._phase = 0.0
         self._alpha = .9 if muted else 1
+        self._zoom = zoom
+        self._breath = 1
         self._art_size, self._art_coords = self._crop(image_path.name, muted)
         with self.canvas:
             self.ink = Color(1, 1, 1, self._alpha)
@@ -268,7 +270,7 @@ class GlassArtwork(Widget):
 
     def layout_art(self, *_):
         source_width, source_height = self._art_size
-        scale = min(self.width / source_width, self.height / source_height)
+        scale = min(self.width / source_width, self.height / source_height * self._zoom) * self._breath
         width, height = source_width * scale, source_height * scale
         pos = (self.x + (self.width - width) / 2, self.y + (self.height - height) / 2)
         self.picture.pos, self.picture.size = pos, (width, height)
@@ -286,10 +288,15 @@ class GlassArtwork(Widget):
             self._tick.cancel()
             self._tick = None
             self.ink.a = self._alpha
+            self._breath = 1
+            self.layout_art()
 
     def _pulse(self, dt):
         self._phase = (self._phase + dt * .85) % (2 * pi)
         self.ink.a = self._alpha * (.981 + .019 * cos(self._phase))
+        if _effects_level == "full":
+            self._breath = .994 + .006 * cos(self._phase)
+            self.layout_art()
 
 
 class ComposerInput(TextInput):
@@ -508,12 +515,17 @@ class Glyph(Widget):
                 path((12, 6), (12, 3))
 
 
-def panel(widget, color, rim=None, radius=14, inset=0):
+def panel(widget, color, rim=None, radius=14, inset=0, luminous=False):
     """Attach a rounded surface and return its mutable fill color and outline."""
     with widget.canvas.before:
         fill = Color(*color)
         body = RoundedRectangle(radius=[dp(radius)])
         glare = None
+        aura = []
+        if luminous:
+            for width, alpha in ((8, .06), (5, .12), (2, .24)):
+                Color(*MINT_LIGHT[:3], alpha)
+                aura.append(Line(width=dp(width)))
         if color[3] and (rim or color in PALETTE.values()):
             Color(*MINT_LIGHT[:3], .10 if color[0] < .2 else .19)
             glare = RoundedRectangle(texture=_glass_reflection())
@@ -531,6 +543,8 @@ def panel(widget, color, rim=None, radius=14, inset=0):
             glare.pos, glare.size, glare.radius = pos, size, [corner]
         if border:
             border.rounded_rectangle = (*pos, *size, corner)
+        for glow in aura:
+            glow.rounded_rectangle = (*pos, *size, corner)
 
     widget.bind(pos=place, size=place)
     place()
@@ -621,11 +635,11 @@ class IconAction(PressFeedback, ButtonBehavior, BoxLayout):
 
 
 class CardButton(PressFeedback, ButtonBehavior, BoxLayout):
-    def __init__(self, callback, color, border, radius=17, **kwargs):
+    def __init__(self, callback, color, border, radius=17, luminous=False, **kwargs):
         super().__init__(**kwargs)
         self.callback = callback
         self._base = color
-        self._fill, _ = panel(self, color, border, radius)
+        self._fill, _ = panel(self, color, border, radius, luminous=luminous)
         self.bind(state=self._style)
 
     def _style(self, *_):

@@ -3890,10 +3890,18 @@ class ChatRoot(BoxLayout):
         self.menu_button = IconAction("", "tools", self._open_chat_header, self._nav_color, button_width=39,
                                      size_hint=(None, 1), icon_size=21, variant="outline")
         header.add_widget(self.menu_button)
+        self.header_balance = Widget(size_hint_x=None, width=0)
+        header.add_widget(self.header_balance)
+        self.header_emblem = GlassArtwork(GLASS_ASSET, size_hint_x=None, width=0)
         self.header_titles = BoxLayout(orientation="vertical")
         self.title_lbl = make_label("Aish", 20, bold=True, halign="center", shorten=True, shorten_from="right")
         self.status_lbl = make_label("", 10.5, "text_dim", shorten=True, size_hint_y=None, height=0)
-        self.header_titles.add_widget(self.title_lbl)
+        title_row = AnchorLayout()
+        self.header_brand = BoxLayout(size_hint_x=None, width=dp(95), spacing=dp(4))
+        self.header_brand.add_widget(self.header_emblem)
+        self.header_brand.add_widget(self.title_lbl)
+        title_row.add_widget(self.header_brand)
+        self.header_titles.add_widget(title_row)
         self.header_titles.add_widget(self.status_lbl)
         header.add_widget(self.header_titles)
         model_slot = BoxLayout(size_hint_x=None, width=dp(135), padding=(0, dp(7)))
@@ -3901,6 +3909,7 @@ class ChatRoot(BoxLayout):
                                          variant="pill", size_hint=(1, 1), icon_last=True, icon_size=15)
         model_slot.add_widget(self.model_button)
         header.add_widget(model_slot)
+        self.model_slot = model_slot
         def boundary(*_):
             self._layout_header(model_slot)
 
@@ -4004,7 +4013,11 @@ class ChatRoot(BoxLayout):
         self.status_lbl.opacity = 1 if self.status_lbl.text else 0
         measure = TextMeasure(font_name=UI_FONT, font_size=sp(12.5), bold=True)
         model_width, _ = measure.get_extents(self.model_button.text)
-        model_slot.width = min(dp(173), max(dp(106), model_width + dp(61)))
+        welcome = self._welcome_panel is not None
+        model_slot.width = dp(89) if welcome else min(dp(158), max(dp(98), model_width + dp(49)))
+        self.header_balance.width = max(0, model_slot.width - self.menu_button.width - dp(7)) if welcome else 0
+        self.header_emblem.width = dp(34) if welcome else 0
+        self.header_brand.width = dp(100) if welcome else max(dp(48), self.header_titles.width - dp(8))
 
     def _build_desktop_sidebar(self):
         sidebar = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(258),
@@ -4094,14 +4107,14 @@ class ChatRoot(BoxLayout):
         page = BoxLayout(orientation="vertical", size_hint_y=None)
         page.bind(minimum_height=page.setter("height"))
         if GLASS_ASSET.is_file():
-            self._welcome_art = GlassArtwork(GLASS_ASSET, T("bg_top"), size_hint_y=None, height=dp(244))
+            self._welcome_art = GlassArtwork(GLASS_ASSET, T("bg_top"), size_hint_y=None, height=dp(244), zoom=1.23)
             page.add_widget(self._welcome_art)
             self._resize_welcome()
             self._welcome_art.set_motion(self._motion_enabled())
-        content = BoxLayout(orientation="vertical", padding=(dp(16), 0, dp(16), dp(12)),
-                            spacing=dp(8), size_hint_y=None)
+        content = BoxLayout(orientation="vertical", padding=(dp(16), 0, dp(16), dp(7)),
+                            spacing=dp(5), size_hint_y=None)
         content.bind(minimum_height=content.setter("height"))
-        greeting = AnchorLayout(size_hint_y=None, height=dp(39))
+        greeting = AnchorLayout(size_hint_y=None, height=dp(36))
         words = BoxLayout(size_hint_x=None, width=dp(170), spacing=dp(4))
         words.add_widget(make_label("Привет!", 30, bold=True, halign="center"))
         words.add_widget(KivyImage(source=str(ASSETS / "wave-hand.png"),
@@ -4109,9 +4122,9 @@ class ChatRoot(BoxLayout):
         greeting.add_widget(words)
         content.add_widget(greeting)
         content.add_widget(make_label("Я Aish — твой умный\nAI-помощник", 15, "text_dim",
-                                      halign="center", size_hint_y=None, height=dp(44)))
-        content.add_widget(Widget(size_hint_y=None, height=dp(6)))
-        choices = GridLayout(cols=3, size_hint_y=None, height=dp(105), spacing=dp(12))
+                                      halign="center", size_hint_y=None, height=dp(39)))
+        content.add_widget(Widget(size_hint_y=None, height=dp(3)))
+        choices = GridLayout(cols=3, size_hint_y=None, height=dp(102), spacing=dp(12))
         shortcuts = (
             (("Новый\nчат", "chat", self._start_welcome_chat),
              ("Генерация\nизображений", "image", self.open_image_studio),
@@ -4128,7 +4141,8 @@ class ChatRoot(BoxLayout):
             for index, (label, icon, action) in enumerate(shortcuts[which]):
                 tile = CardButton(action, T("accent_soft" if not index else "panel"),
                                   T("accent" if not index else "panel3"), orientation="vertical",
-                                  radius=19, spacing=dp(3), padding=(dp(4), dp(9), dp(4), dp(8)))
+                                  radius=19, spacing=dp(3), padding=(dp(4), dp(9), dp(4), dp(8)),
+                                  luminous=not index and STATE["theme"] == "aurora")
                 tile.add_widget(Glyph(icon, T("accent" if not index else "chip_text"), icon_size=34))
                 tile.add_widget(make_label(label, 12, halign="center", size_hint_y=None, height=dp(39)))
                 choices.add_widget(tile)
@@ -4143,7 +4157,7 @@ class ChatRoot(BoxLayout):
             dots.add_widget(dot)
         show_shortcuts(0)
         content.add_widget(choices)
-        page_dots = AnchorLayout(size_hint_y=None, height=dp(31))
+        page_dots = AnchorLayout(size_hint_y=None, height=dp(23))
         page_dots.add_widget(dots)
         content.add_widget(page_dots)
         page.add_widget(content)
@@ -4151,7 +4165,7 @@ class ChatRoot(BoxLayout):
 
     def _resize_welcome(self, *_):
         if self._welcome_art:
-            self._welcome_art.height = min(dp(282), max(dp(100), self.scroll.height - dp(246)))
+            self._welcome_art.height = min(dp(282), max(dp(98), self.scroll.height - dp(215)))
 
     def _start_welcome_chat(self):
         if not self.busy:
@@ -5118,7 +5132,11 @@ class ChatRoot(BoxLayout):
         return labels.get(preferred, preferred)
 
     def _sync_model_button(self):
-        self.model_button.text = "Qwen Vision" if self._pending_photo or self._uses_vision else self._model_label()
+        if self._welcome_panel is not None and not self._pending_photo:
+            self.model_button.text = "Модель"
+        else:
+            self.model_button.text = "Qwen Vision" if self._pending_photo or self._uses_vision else self._model_label()
+        self._layout_header(self.model_slot)
 
     def open_model_picker(self, back=None):
         if self.busy:
@@ -5223,7 +5241,7 @@ class ChatRoot(BoxLayout):
             elif visible and not wide:
                 self.workspace.remove_widget(self.desktop_sidebar)
         try:
-            self.header_widget.height = dp(56 if landscape else 66)
+            self.header_widget.height = dp(53 if landscape else 57)
             self._refresh_bottom_layout()
             # Capture a new baseline after rotation only once the IME is settled.
             # The callback checks keyboard visibility again before accepting it.
