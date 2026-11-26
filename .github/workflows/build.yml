@@ -260,6 +260,7 @@ jobs:
         run: |
           $env:AISH_DATA_DIR = Join-Path $env:RUNNER_TEMP 'aish-stream-tests'
           $env:KIVY_HOME = Join-Path $env:AISH_DATA_DIR 'kivy'
+          New-Item -ItemType Directory -Force -Path $env:KIVY_HOME | Out-Null
           python .github/scripts/test_streaming.py
       - name: Package Aish for Windows
         run: python .github/scripts/build_windows.py

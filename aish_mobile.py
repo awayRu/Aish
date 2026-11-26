@@ -89,6 +89,22 @@ _pointer_bound = False
 _effects_level = "full"
 
 
+@lru_cache(maxsize=1)
+def _android_haptic():
+    from android.runnable import run_on_ui_thread
+    from jnius import autoclass
+
+    @run_on_ui_thread
+    def tick():
+        try:
+            activity = autoclass("org.kivy.android.PythonActivity").mActivity
+            activity.getWindow().getDecorView().performHapticFeedback(3)
+        except Exception:
+            pass
+
+    return tick
+
+
 def set_effects(level):
     global _effects_level
     _effects_level = level
@@ -120,6 +136,8 @@ class PressFeedback:
         self.bind(pos=self._place_feedback, size=self._place_feedback, state=self._press_effect,
                   parent=self._track_pointer, scale_feedback=self._paint_feedback,
                   glow_feedback=self._paint_feedback)
+        if platform == "android":
+            self.bind(on_press=self._touch_feedback)
         self._place_feedback()
 
     def _place_feedback(self, *_):
@@ -144,6 +162,14 @@ class PressFeedback:
     def _paint_feedback(self, *_):
         self._press_scale.x = self._press_scale.y = self.scale_feedback
         self._press_ink.a = self.glow_feedback
+
+    @staticmethod
+    def _touch_feedback(*_):
+        if _effects_level != "off":
+            try:
+                _android_haptic()()
+            except ImportError:
+                pass
 
     def _press_effect(self, *_):
         down = self.state == "down"

@@ -1960,6 +1960,7 @@ _SETTING_KEYS = (
     "response_length", "auto_scroll", "show_suggestions", "show_model_status",
     "message_animations", "performance_mode", "sparkle_background", "image_size", "custom_prompt",
     "use_memory_context", "use_knowledge_context", "self_check_response", "image_ratio", "horde_image_fallback",
+    "keyboard_suggestions", "voice_input_enabled", "update_notifications",
 )
 
 
@@ -1983,6 +1984,7 @@ _SETTING_DEFAULTS = {
     "performance_mode": True, "sparkle_background": True, "image_size": "512", "custom_prompt": "",
     "use_memory_context": True, "use_knowledge_context": True, "self_check_response": True,
     "image_ratio": "1:1", "horde_image_fallback": False,
+    "keyboard_suggestions": True, "voice_input_enabled": True, "update_notifications": True,
 }
 _SETTING_CHOICES = {
     "theme": set(THEMES), "font_size": set(FONTS), "font_weight": {"normal", "bold"},
@@ -1994,7 +1996,8 @@ _SETTING_CHOICES = {
 }
 _BOOLEAN_SETTINGS = {"show_time", "show_avatars", "voice_out", "fallback_enabled", "streaming",
                      "auto_scroll", "show_suggestions", "show_model_status", "message_animations", "performance_mode", "sparkle_background",
-                     "use_memory_context", "use_knowledge_context", "self_check_response", "horde_image_fallback"}
+                     "use_memory_context", "use_knowledge_context", "self_check_response", "horde_image_fallback",
+                     "keyboard_suggestions", "voice_input_enabled", "update_notifications"}
 for _k, _default in _SETTING_DEFAULTS.items():
     _stored = _meta_get(_k, "1" if _default is True else "0" if _default is False else str(_default))
     if _k in _BOOLEAN_SETTINGS:
@@ -3936,7 +3939,7 @@ class ChatRoot(BoxLayout):
             background_normal="", background_active="", background_disabled_normal="",
             background_color=(0, 0, 0, 0), padding=(0, dp(11)),
             cursor_width=dp(2), line_spacing=dp(4),
-            input_type="text", keyboard_suggestions=True,
+            input_type="text", keyboard_suggestions=STATE["keyboard_suggestions"],
         )
         self.photo_row = BoxLayout(size_hint=(None, None), height=0, opacity=0, spacing=dp(9),
                                    padding=(dp(7), dp(5), dp(5), dp(5)))
@@ -4985,6 +4988,10 @@ class ChatRoot(BoxLayout):
         def preference(key, enabled):
             STATE[key] = bool(enabled)
             save_settings()
+            if key == "keyboard_suggestions":
+                self.input.keyboard_suggestions = bool(enabled)
+            elif key == "voice_input_enabled":
+                self._place_composer()
 
         effect_names = {"full": "Полные", "reduced": "Уменьшенные", "off": "Отключены"}
 
@@ -5048,6 +5055,11 @@ class ChatRoot(BoxLayout):
             self._mobile_card("Тема оформления", "sliders", choose_theme,
                               "Тёмная (изумрудная)" if STATE["theme"] == "aurora" else TV("name"), grouped=True),
             self._mobile_card("Размер текста", "text", choose_font, fonts[STATE["font_size"]], grouped=True),
+            switch_item("Подсказки клавиатуры", "text", STATE["keyboard_suggestions"],
+                        lambda enabled: preference("keyboard_suggestions", enabled)),
+            *([switch_item("Голосовой ввод", "mic", STATE["voice_input_enabled"],
+                           lambda enabled: preference("voice_input_enabled", enabled))]
+              if kivy_platform == "android" else []),
             self._mobile_card("Визуальные эффекты", "studio", choose_effects,
                               effect_names[self._effects_level()], grouped=True),
             switch_item("Потоковый вывод", "check", STATE["streaming"],
@@ -5055,6 +5067,8 @@ class ChatRoot(BoxLayout):
             switch_item("Голосовой ответ", "volume", STATE["voice_out"],
                         lambda enabled: preference("voice_out", enabled)),
             self._mobile_card("Память и данные", "history", self.open_mobile_data, grouped=True),
+            switch_item("Уведомления об обновлении", "cloud", STATE["update_notifications"],
+                        lambda enabled: preference("update_notifications", enabled)),
         ])
         page.add_widget(popup_button("Все настройки", self.open_settings))
 
@@ -5452,12 +5466,13 @@ class ChatRoot(BoxLayout):
         self.photo_button.opacity, self.photo_button.disabled = (0, True)
         self.composer_photo_button.opacity = int(expanded)
         self.composer_photo_button.disabled = not expanded
+        show_mic = self.composer_mic_button is not None and STATE["voice_input_enabled"]
         if self.composer_mic_button:
             self.composer_mic_button.pos = ((frame.x + dp(121)) if expanded else (right - dp(99)), frame.y + dp(7))
-            self.composer_mic_button.opacity = 1
-            self.composer_mic_button.disabled = False
+            self.composer_mic_button.opacity = int(show_mic)
+            self.composer_mic_button.disabled = not show_mic
         horizontal_offset = dp(15 if expanded else 49)
-        right_offset = dp(15 if expanded else 103 if self.composer_mic_button else 57)
+        right_offset = dp(15 if expanded else 103 if show_mic else 57)
         self.input.width = max(dp(40), frame.width - horizontal_offset - right_offset)
         self.input.pos = (frame.x + horizontal_offset, frame.y + dp(52 if expanded else 6))
         self.input.hint_text = "Напиши сообщение…" if self.input.width >= dp(168) else "Сообщение…"
@@ -6354,6 +6369,9 @@ class ChatRoot(BoxLayout):
         self.toast("На устройстве недоступно распознавание речи")
 
     def voice_click(self):
+        if not STATE["voice_input_enabled"]:
+            self.toast("Голосовой ввод отключён в настройках")
+            return
         if self.busy:
             self.toast("Заверши текущую генерацию")
             return
@@ -8946,6 +8964,8 @@ class ChatApp(App):
         """Enable tablet rotation where appropriate and check Releases off the UI thread."""
         if kivy_platform == "android":
             self._enable_tablet_rotation()
+        if not STATE["update_notifications"]:
+            return
         threading.Thread(
             target=self._check_for_updates_worker,
             daemon=True,
