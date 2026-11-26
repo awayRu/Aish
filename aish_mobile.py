@@ -409,6 +409,9 @@ class Glyph(Widget):
             elif name == "more":
                 for px in (5, 12, 19):
                     circle(px, 12, 1.35, True)
+            elif name == "more_vertical":
+                for py in (5, 12, 19):
+                    circle(12, py, 1.6, True)
             elif name == "back":
                 path((20, 12), (4, 12), (10, 18))
                 path((4, 12), (10, 6))
@@ -580,7 +583,7 @@ class IconAction(PressFeedback, ButtonBehavior, BoxLayout):
     text = StringProperty("")
 
     def __init__(self, text, icon, callback, tint, *, variant="quiet", button_width=44,
-                 button_height=44, icon_size=21, icon_last=False, **kwargs):
+                 button_height=44, icon_size=21, icon_last=False, radius=None, **kwargs):
         kwargs.setdefault("size_hint", (None, None))
         kwargs.setdefault("orientation", "horizontal")
         kwargs.setdefault("spacing", dp(4))
@@ -604,8 +607,10 @@ class IconAction(PressFeedback, ButtonBehavior, BoxLayout):
                 self.add_widget(child)
         else:
             self.add_widget(self.glyph)
+        if radius is None:
+            radius = 24 if variant == "pill" else 12
         self._fill, self._rim = panel(self, (0, 0, 0, 0), (0, 0, 0, 0),
-                                      24 if variant == "pill" else 12)
+                                      radius)
         self.bind(state=self._style, disabled=self._style, text=self._update_caption)
         self._style()
 

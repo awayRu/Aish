@@ -3389,9 +3389,10 @@ class MessageBubble(BoxLayout):
         if is_me:
             self.add_widget(Widget(size_hint_x=1))
         elif show_avatars and self._eclipse:
-            avatar = AnchorLayout(anchor_y="top", size_hint_x=None, width=dp(30), padding=(0, dp(4), 0, 0))
-            avatar.add_widget(Glyph("brand", T("accent"), icon_size=29, size_hint=(None, None),
-                                    size=(dp(30), dp(30))))
+            avatar = AnchorLayout(anchor_y="top", size_hint_x=None, width=dp(39), padding=(0, dp(4), 0, 0))
+            emblem = GlassArtwork(GLASS_ASSET, size_hint=(None, None), size=(dp(39), dp(39)))
+            panel(emblem, T("chip"), T("panel3"), radius=20)
+            avatar.add_widget(emblem)
             self.add_widget(avatar)
         elif show_avatars:
             self.add_widget(Avatar("AI", T("avatar_ai"), size_px=dp(25)))
@@ -3907,6 +3908,8 @@ class ChatRoot(BoxLayout):
         model_slot = BoxLayout(size_hint_x=None, width=dp(135), padding=(0, dp(7)))
         self.model_button = IconAction(self._model_label(), "down", self.open_model_picker, self._nav_color,
                                          variant="pill", size_hint=(1, 1), icon_last=True, icon_size=15)
+        self.compact_model_button = IconAction("", "more_vertical", self.open_model_picker, self._nav_color,
+                                               size_hint=(1, 1), icon_size=22)
         model_slot.add_widget(self.model_button)
         header.add_widget(model_slot)
         self.model_slot = model_slot
@@ -3940,7 +3943,7 @@ class ChatRoot(BoxLayout):
         dock = BoxLayout(orientation="vertical", size_hint_y=None,
                          padding=(dp(22), dp(5), dp(22), dp(14)))
         composer = Widget(size_hint_y=None, height=dp(58))
-        _, self.composer_frame_color = panel(composer, T("panel2"), T("ring_bg"), 16)
+        _, self.composer_frame_color = panel(composer, T("panel2"), T("ring_bg"), 28)
         self.input = ComposerInput(
             self.send, hint_text="Сообщение для Aish", size_hint=(None, None),
             height=dp(45), font_size=sp(16.5), foreground_color=T("text"),
@@ -3957,7 +3960,7 @@ class ChatRoot(BoxLayout):
         composer.add_widget(self.photo_row)
         composer.add_widget(self.input)
         self.attach_button = IconAction("", "plus", self.open_composer_actions, self._nav_color,
-                                          button_width=38)
+                                          variant="outline", button_width=38, radius=22)
         self.photo_button = IconAction("", "image", self.choose_photo, self._nav_color,
                                          button_width=39)
         self.composer_photo_button = IconAction("Фото", "image", self.choose_photo, self._nav_color,
@@ -3971,9 +3974,9 @@ class ChatRoot(BoxLayout):
             composer.add_widget(self.composer_mic_button)
         self.action_slot = BoxLayout(size_hint=(None, None), size=(dp(45), dp(44)))
         self.send_button = IconAction("", "send", self._press_send, self._nav_color, variant="solid",
-                                        size_hint=(1, 1))
+                                        size_hint=(1, 1), radius=23)
         self.stop_button = IconAction("", "stop", self.stop_generation, self._nav_color,
-                                        variant="danger", size_hint=(1, 1))
+                                        variant="danger", size_hint=(1, 1), radius=23)
         self.action_slot.add_widget(self.send_button)
         composer.add_widget(self.action_slot)
         dock.add_widget(composer)
@@ -4021,15 +4024,10 @@ class ChatRoot(BoxLayout):
         self.header_emblem.width = dp(34) if welcome else 0
         self.header_brand.width = dp(100) if welcome else max(dp(48), self.header_titles.width - dp(8))
         self.title_lbl.font_size = sp(17 if compact else 20)
-        self.model_button.caption.opacity = int(not compact)
-        self.model_button.glyph.size_hint_x = 1 if compact else None
-        if not compact:
-            self.model_button.glyph.width = dp(18)
-        self.model_button.padding = (0, 0, 0, 0) if compact else (dp(10), 0, dp(8), 0)
-        self.model_button.caption.size_hint_x = 0 if compact else 1
-        self.model_button.spacing = 0 if compact else dp(4)
-        self.model_button.glyph.name = "more" if compact else "down"
-        self.model_button.glyph.draw()
+        model_action = self.compact_model_button if compact else self.model_button
+        if model_action.parent is not model_slot:
+            model_slot.clear_widgets()
+            model_slot.add_widget(model_action)
 
     def _build_desktop_sidebar(self):
         sidebar = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(258),
@@ -4571,25 +4569,15 @@ class ChatRoot(BoxLayout):
         return content
 
     @staticmethod
-    def _mobile_field(hint="", height=47, multiline=False, icon=None, **kwargs):
+    def _mobile_field(hint="", height=47, multiline=False, **kwargs):
         field = TextInput(hint_text=hint, multiline=multiline, size_hint_y=None,
                           height=dp(height), font_size=sp(15), foreground_color=T("text"),
                           hint_text_color=T("text_dim"), cursor_color=T("accent"),
-                          padding=(dp(41 if icon else 14), dp(12), dp(14), dp(10)),
+                          padding=kwargs.pop("padding", (dp(14), dp(12), dp(14), dp(10))),
                           background_normal="", background_active="", background_disabled_normal="",
                           background_color=(0, 0, 0, 0), write_tab=False, **kwargs)
         _, border = panel(field, T("panel"), T("panel3"), 15)
         field.bind(focus=lambda item, focused: setattr(border, "rgba", T("accent") if focused else T("panel3")))
-        if icon:
-            glyph = Glyph(icon, T("text_faint"), icon_size=19, size_hint=(None, None),
-                          size=(dp(26), dp(26)))
-            field.add_widget(glyph)
-
-            def place(*_):
-                glyph.pos = (field.x + dp(9), field.y + field.height / 2 - dp(13))
-
-            field.bind(pos=place, size=place)
-            place()
         return field
 
     @staticmethod
@@ -4676,8 +4664,14 @@ class ChatRoot(BoxLayout):
         create = IconAction("", "plus", self.new_chat, self._nav_color,
                             variant="outline", button_width=39, button_height=39, icon_size=21)
         page = self._mobile_section("history", "История диалогов", title_action=create)
-        query = self._mobile_field("Поиск по диалогам…", icon="search")
-        page.add_widget(query)
+        search = FloatLayout(size_hint_y=None, height=dp(47))
+        query = self._mobile_field("Поиск по диалогам…",
+                                   pos_hint={"x": 0, "y": 0},
+                                   padding=(dp(40), dp(12), dp(14), dp(10)))
+        search.add_widget(query)
+        search.add_widget(Glyph("search", T("text_dim"), icon_size=21, size_hint=(None, None),
+                                size=(dp(40), dp(30)), pos_hint={"x": 0, "center_y": .5}))
+        page.add_widget(search)
         show_archive = False
 
         def switch(index):
