@@ -211,7 +211,7 @@ def _emblem_texture(path):
     from PIL import Image
 
     with Image.open(path) as source:
-        image = source.convert("RGBA").transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+        image = source.convert("RGBA").transpose(getattr(Image, "Transpose", Image).FLIP_TOP_BOTTOM)
     width, height = image.size
     data = bytearray(image.tobytes())
     for row in range(height):

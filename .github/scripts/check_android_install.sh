@@ -21,6 +21,12 @@ launch_and_check() {
   for _ in $(seq 1 45); do
     pid=$(adb shell pidof -s "$app" 2>/dev/null | tr -d '\r' || true)
     if [[ -n "$pid" ]] && adb logcat -d --pid="$pid" | grep -F 'Start application main loop' > /dev/null; then
+      sleep 4
+      if adb logcat -d --pid="$pid" | grep -E '\[Startup\] Initial chat load failed|FATAL EXCEPTION' > /dev/null; then
+        adb logcat -d --pid="$pid" -s python AndroidRuntime
+        return 1
+      fi
+      [[ "$(adb shell pidof -s "$app" | tr -d '\r')" == "$pid" ]] || return 1
       echo "Aish started successfully under Android (PID $pid)."
       return
     fi
