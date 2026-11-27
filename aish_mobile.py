@@ -14,6 +14,7 @@ from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.button import Button
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
@@ -30,18 +31,22 @@ if (ASSETS / "Inter-Regular.ttf").is_file() and (ASSETS / "Inter-Bold.ttf").is_f
                        fn_bold=str(ASSETS / "Inter-Bold.ttf"))
 
 PALETTE = {key: tuple(get_color_from_hex(value)) for key, value in {
-    "bg_top": "#051412", "bg_bot": "#041210",
-    "panel": "#0a1c1a", "panel2": "#102725", "panel3": "#243f39",
-    "settings_panel": "#091817",
+    "bg_top": "#041110", "bg_bot": "#040f0e",
+    "panel": "#0a1a18", "panel2": "#102725", "panel3": "#203632",
+    "settings_panel": "#091817", "divider": "#1a2c28",
+    "search_glass": "#142a27", "profile_glass": "#08201b",
+    "history_glass": "#0a1f1b", "history_badge": "#164f3a",
+    "switch_track": "#35906d", "switch_thumb": "#c4f8e2", "send": "#4bb089",
     "text": "#f8f8f8", "text_dim": "#c3ccca", "text_faint": "#9eaeaa",
     "accent": "#63c69e", "accent_text": "#06251b", "accent_soft": "#133c31",
-    "bubble_me": "#164837", "bubble_ai": "#0e201e", "bubble_text": "#f8f8f8",
+    "bubble_me": "#0f3428", "bubble_ai": "#0a1917", "bubble_text": "#f8f8f8",
     "chip": "#0e2420", "chip_text": "#c4e8dc", "avatar_me": "#215742", "avatar_ai": "#0e392c",
     "ring_bg": "#315a4c", "danger": "#ff9c9e", "danger_bg": "#392227",
     "success": "#9ceecf", "success_bg": "#1a4238", "star": "#ffd080", "star_bg": "#342b1c",
     "online": "#9ceecf", "shadow": "#0000004d",
 }.items()}
 MINT_LIGHT = tuple(get_color_from_hex("#a7f2d8"))
+EMBLEM_CROP = (30, 5, 249, 199)
 
 
 def _rgba_texture(width, height, pixels):
@@ -50,8 +55,8 @@ def _rgba_texture(width, height, pixels):
     return texture
 
 
-@lru_cache(maxsize=1)
-def jade_waves():
+@lru_cache(maxsize=2)
+def jade_waves(footer=False):
     """Two soft refracted ribbons with transparent edges for the jade screens."""
     width, height = 320, 150
     pixels = bytearray()
@@ -59,17 +64,20 @@ def jade_waves():
         y = row / (height - 1)
         for column in range(width):
             x = column / (width - 1)
-            ridge = .38 + .14 * sin(x * 7.8 - .45) + x * .31
+            if footer:
+                ridge = .26 + .54 * x + .16 * sin(2 * pi * (x - .17))
+            else:
+                ridge = .34 + .19 * sin(2 * pi * (x - .05)) + .22 * x
             distance = y - ridge
-            rim = exp(-((distance - .009) / .016) ** 2)
-            halo = exp(-((distance + .035) / .091) ** 2)
-            broad = exp(-((distance + .105) / .16) ** 2)
-            reflection = exp(-((distance + .23 + .06 * sin(x * 11)) / .042) ** 2)
-            focus = .32 + .68 * (.5 + .5 * sin(x * 10.5 + .7))
+            rim = exp(-(distance / .011) ** 2)
+            face = exp(-((distance + .06) / .075) ** 2)
+            halo = exp(-((distance - .04) / .16) ** 2)
+            reflection = exp(-((distance + .21 + .08 * sin(x * 11)) / .055) ** 2)
+            focus = .30 + .70 * (.5 + .5 * sin(x * 11 + .30))
             edge = min(1, y * 8, (1 - y) * 8)
-            alpha = (.30 * rim + .44 * halo + .18 * broad + .08 * reflection) * focus * edge
-            pixels.extend((round(32 + 116 * rim), round(130 + 103 * rim),
-                           round(100 + 110 * rim), round(min(1, alpha) * 255)))
+            alpha = (.29 * rim + .64 * face + .21 * halo + .20 * reflection) * focus * edge
+            pixels.extend((round(26 + 104 * rim), round(128 + 97 * rim),
+                           round(102 + 96 * rim), round(min(1, alpha) * 255)))
     return _rgba_texture(width, height, pixels)
 
 
@@ -84,6 +92,17 @@ def _glass_reflection():
             light += .57 * exp(-((y - .02) / .22) ** 2) * (.30 + .70 * x)
             pixels.extend((216, 255, 239, round(light * 255)))
     return _rgba_texture(32, 32, pixels)
+
+
+@lru_cache(maxsize=1)
+def _press_light():
+    pixels = bytearray()
+    for row in range(48):
+        for col in range(48):
+            distance_squared = ((row - 23.5) / 23.5) ** 2 + ((col - 23.5) / 23.5) ** 2
+            alpha = max(0, 1 - distance_squared) ** 2
+            pixels.extend((255, 255, 255, round(alpha * 255)))
+    return _rgba_texture(48, 48, pixels)
 
 
 _hoverable = WeakSet()
@@ -124,28 +143,37 @@ def _pointer_move(_window, point):
 class PressFeedback:
     scale_feedback = NumericProperty(1)
     glow_feedback = NumericProperty(0)
+    wave_feedback = NumericProperty(1)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._hovered = False
+        self._wave_origin = (.5, .5)
         with self.canvas.before:
             PushMatrix()
             self._press_scale = Scale(1, 1, 1, origin=self.center)
         with self.canvas.after:
             self._press_ink = Color(*MINT_LIGHT[:3], 0)
             self._press_reflection = RoundedRectangle(texture=_glass_reflection(), radius=[dp(12)])
+            self._wave_ink = Color(*MINT_LIGHT[:3], 0)
+            self._press_wave = RoundedRectangle(texture=_press_light(), radius=[dp(12)])
             PopMatrix()
         self.bind(pos=self._place_feedback, size=self._place_feedback, state=self._press_effect,
                   parent=self._track_pointer, scale_feedback=self._paint_feedback,
-                  glow_feedback=self._paint_feedback)
+                  glow_feedback=self._paint_feedback, wave_feedback=self._paint_feedback)
         if platform == "android":
             self.bind(on_press=self._touch_feedback)
         self._place_feedback()
 
     def _place_feedback(self, *_):
         self._press_scale.origin = self.center
-        self._press_reflection.pos = self.pos
-        self._press_reflection.size = self.size
+        self._press_reflection.pos = self._press_wave.pos = self.pos
+        self._press_reflection.size = self._press_wave.size = self.size
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos) and self.width and self.height and not touch.is_mouse_scrolling:
+            self._wave_origin = ((touch.x - self.x) / self.width, (touch.y - self.y) / self.height)
+        return super().on_touch_down(touch)
 
     def _track_pointer(self, _widget, parent):
         if platform != "win":
@@ -164,6 +192,13 @@ class PressFeedback:
     def _paint_feedback(self, *_):
         self._press_scale.x = self._press_scale.y = self.scale_feedback
         self._press_ink.a = self.glow_feedback
+        reach = self.wave_feedback
+        self._wave_ink.a = self.glow_feedback * .65 if reach < 1 else 0
+        if self._wave_ink.a:
+            x, y = self._wave_origin
+            left, right = .5 - x / reach, .5 + (1 - x) / reach
+            bottom, top = .5 - y / reach, .5 + (1 - y) / reach
+            self._press_wave.tex_coords = (left, bottom, right, bottom, right, top, left, top)
 
     @staticmethod
     def _touch_feedback(*_):
@@ -177,14 +212,33 @@ class PressFeedback:
         down = self.state == "down"
         target = .972 if down else 1
         glow = .22 if down else .09 if self._hovered else 0
-        Animation.cancel_all(self, "scale_feedback", "glow_feedback")
+        Animation.cancel_all(self, "scale_feedback", "glow_feedback", "wave_feedback")
         if _effects_level == "off":
             self.scale_feedback = 1
             self.glow_feedback = 0
+            self.wave_feedback = 1
             return
         duration = .12 if down else .18
         Animation(scale_feedback=target if _effects_level == "full" else 1,
                   glow_feedback=glow, d=duration, t="out_quad").start(self)
+        if _effects_level == "full":
+            if down:
+                self.wave_feedback = .24
+            Animation(wave_feedback=.82 if down else 1, d=.19, t="out_quad").start(self)
+        else:
+            self.wave_feedback = 1
+
+
+class GlassTextButton(PressFeedback, Button):
+    """Text action for dialogs, settings and segmented controls."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("font_name", UI_FONT)
+        kwargs.setdefault("background_normal", "")
+        kwargs.setdefault("background_down", "")
+        kwargs.setdefault("background_disabled_normal", "")
+        kwargs.setdefault("background_color", (0, 0, 0, 0))
+        super().__init__(**kwargs)
 
 
 @lru_cache(maxsize=4)
@@ -216,11 +270,12 @@ def _emblem_texture(path):
         image = source.convert("RGBA").transpose(getattr(Image, "Transpose", Image).FLIP_TOP_BOTTOM)
     width, height = image.size
     data = bytearray(image.tobytes())
+    left, top, right, bottom = EMBLEM_CROP if image.size == (268, 212) else (0, 0, width, height)
     for row in range(height):
-        y = row / (height - 1)
+        y = height - row - 1
         for col in range(width):
-            x = col / (width - 1)
-            edge = min(1, x / .18, (1 - x) / .18, y / .22, (1 - y) / .16)
+            edge = max(0, min(1, (col - left) / 22, (right - col) / 20,
+                              (y - top) / 9, (bottom - y) / 19))
             base = (row * width + col) * 4
             strength = max(.04, min(1, (max(data[base:base + 3]) - 35) / 76))
             data[base + 3] = round(255 * strength * edge * edge * (3 - 2 * edge))
@@ -254,7 +309,9 @@ class GlassArtwork(Widget):
 
     def _crop(self, name, muted):
         width, height = self.texture.size
-        if name == "aish-glass-reference.png" and (width, height) == (898, 607):
+        if name == "aish-premium-symbol.png" and (width, height) == (268, 212):
+            left, top, right, bottom = EMBLEM_CROP
+        elif name == "aish-glass-reference.png" and (width, height) == (898, 607):
             # The asset contains only the artwork region of the approved mockup.
             left, top, right, bottom = (96, 11, 842, 607) if muted else (0, 0, 898, 607)
         elif name == "aish-welcome-art.png" and (width, height) == (1536, 1024):
@@ -567,7 +624,7 @@ class Glyph(Widget):
                 path((12, 6), (12, 3))
 
 
-def panel(widget, color, rim=None, radius=14, inset=0, luminous=False):
+def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=False):
     """Attach a rounded surface and return its mutable fill color and outline."""
     canvas = widget.canvas.before
     if isinstance(widget, TextInput):
@@ -585,8 +642,9 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False):
             for width, alpha in ((6, .035), (4, .08), (2, .16)):
                 Color(*MINT_LIGHT[:3], alpha)
                 aura.append(Line(width=dp(width)))
-        if color[3] and (rim or color in PALETTE.values()):
-            Color(*MINT_LIGHT[:3], .16 if color[0] < .2 else .22)
+        if glass or (color[3] and (rim or color in PALETTE.values())):
+            alpha = .30 if luminous else .13
+            Color(*MINT_LIGHT[:3], alpha)
             glare = RoundedRectangle(texture=_glass_reflection())
         outline = Color(*rim) if rim else None
         border = Line(width=dp(.60)) if rim else None
@@ -658,8 +716,8 @@ class IconAction(PressFeedback, ButtonBehavior, BoxLayout):
             self.add_widget(self.glyph)
         if radius is None:
             radius = 24 if variant == "pill" else 12
-        self._fill, self._rim = panel(self, (0, 0, 0, 0), (0, 0, 0, 0),
-                                      radius)
+        self._fill, self._rim = panel(self, (0, 0, 0, 0), (0, 0, 0, 0), radius,
+                                      glass=variant in ("solid", "outline", "pill"))
         self.bind(state=self._style, disabled=self._style, text=self._update_caption)
         self._style()
 
