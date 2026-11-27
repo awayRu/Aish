@@ -44,7 +44,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "56"
+APP_VERSION = "57"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -5538,8 +5538,8 @@ class ChatRoot(BoxLayout):
             photo_space = self.photo_row.height + dp(5) if self._pending_photo else 0
             self.composer_widget.height = self.input.height + dp(60) + photo_space
         else:
-            self.input.height = dp(46)
-            self.composer_widget.height = dp(59)
+            self.input.height = dp(44)
+            self.composer_widget.height = dp(52)
         self.composer_dock.height = self.composer_widget.height + dp(18)
         self.bottom_bar.height = self.composer_dock.height + chips_height
         in_chat = self.mobile_screens.current == "chat"
@@ -5555,22 +5555,24 @@ class ChatRoot(BoxLayout):
         right = frame.x + frame.width
         top = frame.y + frame.height
         expanded = self._composer_expanded
-        self.action_slot.pos = (right - dp(53), frame.y + dp(7))
-        self.attach_button.pos = (frame.x + dp(5), frame.y + dp(7))
-        self.photo_button.pos = (right - dp(132), frame.y + dp(7))
-        self.composer_photo_button.pos = (frame.x + dp(41), frame.y + dp(7))
+        actions_y = frame.y + dp(7) if expanded else frame.center_y - dp(22)
+        self.action_slot.pos = (right - dp(53), actions_y)
+        self.attach_button.pos = (frame.x + dp(5), actions_y)
+        self.photo_button.pos = (right - dp(132), actions_y)
+        self.composer_photo_button.pos = (frame.x + dp(41), actions_y)
         self.photo_button.opacity, self.photo_button.disabled = (0, True)
         self.composer_photo_button.opacity = int(expanded)
         self.composer_photo_button.disabled = not expanded
         show_mic = self.composer_mic_button is not None and STATE["voice_input_enabled"]
         if self.composer_mic_button:
-            self.composer_mic_button.pos = ((frame.x + dp(121)) if expanded else (right - dp(99)), frame.y + dp(7))
+            self.composer_mic_button.pos = ((frame.x + dp(121)) if expanded else (right - dp(99)), actions_y)
             self.composer_mic_button.opacity = int(show_mic)
             self.composer_mic_button.disabled = not show_mic
         horizontal_offset = dp(15 if expanded else 49)
         right_offset = dp(15 if expanded else 103 if show_mic else 57)
         self.input.width = max(dp(40), frame.width - horizontal_offset - right_offset)
-        self.input.pos = (frame.x + horizontal_offset, frame.y + dp(52 if expanded else 6))
+        input_y = frame.y + dp(52) if expanded else frame.center_y - self.input.height / 2
+        self.input.pos = (frame.x + horizontal_offset, input_y)
         self.input.hint_text = "Напиши сообщение…" if self.input.width >= dp(168) else "Сообщение…"
         self.photo_row.pos = (frame.x + dp(10), top - self.photo_row.height - dp(8))
         self.photo_row.width = max(0, frame.width - dp(20))

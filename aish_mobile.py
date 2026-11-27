@@ -8,7 +8,8 @@ from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
 from kivy.core.text import LabelBase
-from kivy.graphics import Canvas, Color, Ellipse, Line, PopMatrix, PushMatrix, Rectangle, RoundedRectangle, Scale
+from kivy.graphics import (Canvas, Color, Ellipse, Line, PopMatrix, PushMatrix,
+                           Rectangle, RoundedRectangle, Scale, Triangle)
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty, StringProperty
@@ -79,8 +80,8 @@ def _glass_reflection():
         y = row / 31
         for column in range(32):
             x = column / 31
-            light = .63 * exp(-((1 - y) / .16) ** 2) * (.45 + .55 * (1 - x))
-            light += .49 * exp(-(y / .12) ** 2) * x
+            light = .81 * exp(-((1 - y) / .22) ** 2) * (.22 + .78 * (1 - x))
+            light += .57 * exp(-((y - .02) / .22) ** 2) * (.30 + .70 * x)
             pixels.extend((216, 255, 239, round(light * 255)))
     return _rgba_texture(32, 32, pixels)
 
@@ -366,6 +367,11 @@ class Glyph(Widget):
             elif name == "home":
                 path((2, 11), (12, 21), (22, 11))
                 path((5, 13), (5, 3), (10, 3), (10, 9), (14, 9), (14, 3), (19, 3), (19, 13))
+            elif name == "home_active":
+                Triangle(points=(x(1.5), y(11), x(12), y(21.5), x(22.5), y(11)))
+                Rectangle(pos=(x(5), y(9)), size=(14 * unit, 2.5 * unit))
+                for px in (5, 14):
+                    Rectangle(pos=(x(px), y(3)), size=(5 * unit, 6 * unit))
             elif name == "profile":
                 circle(12, 16, 4)
                 path((4, 3), (4, 6), (7, 9), (17, 9), (20, 6), (20, 3), (4, 3))
@@ -397,6 +403,14 @@ class Glyph(Widget):
             elif name in ("chat", "message"):
                 path((4, 8), (3, 9), (3, 18), (5, 20), (19, 20), (21, 18), (21, 9),
                      (19, 7), (10, 7), (5, 4), (5, 8), (4, 8))
+                for px in (7, 12, 17):
+                    circle(px, 13.5, .9, True)
+            elif name == "chat_active":
+                RoundedRectangle(pos=(x(2), y(6)), size=(20 * unit, 15 * unit), radius=[4 * unit])
+                Triangle(points=(x(6), y(7), x(11), y(7), x(6), y(2)))
+                Color(*PALETTE["accent_text"])
+                for px in (7, 12, 17):
+                    circle(px, 13.5, 1.1, True)
             elif name in ("history", "layers"):
                 path((3, 15), (12, 20), (21, 15), (12, 10), (3, 15))
                 path((3, 11), (12, 6), (21, 11))
@@ -572,7 +586,7 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False):
                 Color(*MINT_LIGHT[:3], alpha)
                 aura.append(Line(width=dp(width)))
         if color[3] and (rim or color in PALETTE.values()):
-            Color(*MINT_LIGHT[:3], .10 if color[0] < .2 else .19)
+            Color(*MINT_LIGHT[:3], .16 if color[0] < .2 else .22)
             glare = RoundedRectangle(texture=_glass_reflection())
         outline = Color(*rim) if rim else None
         border = Line(width=dp(.60)) if rim else None
@@ -699,34 +713,56 @@ class CardButton(PressFeedback, ButtonBehavior, BoxLayout):
 
 
 class NavButton(PressFeedback, ButtonBehavior, BoxLayout):
+    selected_opacity = NumericProperty(0)
+
     def __init__(self, title, icon, action, tint, **kwargs):
         super().__init__(orientation="vertical", padding=(0, dp(4), 0, dp(9)), **kwargs)
         self.tint = tint
         self.action = action
         self.active = False
+        self.icon = icon
         self.glyph = Glyph(icon, tint("text_dim"), icon_size=22, size_hint_y=.60)
         self.caption = Label(text=title, font_name=UI_FONT, font_size=sp(10.5),
                              size_hint_y=.40, color=tint("text_dim"))
         self.add_widget(self.glyph)
         self.add_widget(self.caption)
-        with self.canvas.after:
-            self.marker = Color(*tint("accent")[:3], 0)
-            self.line = RoundedRectangle(size=(dp(18), dp(2)), radius=[dp(1)])
-        self.bind(pos=self.place, size=self.place, state=self._style)
+        with self.canvas.before:
+            self.selected_fill = Color(*tint("accent_soft")[:3], 0)
+            self.selected_shape = RoundedRectangle(radius=[dp(15)])
+            self.selected_light = Color(*tint("accent")[:3], 0)
+            self.selected_reflection = RoundedRectangle(texture=_glass_reflection(), radius=[dp(15)])
+        self.bind(pos=self.place, size=self.place, state=self._style,
+                  selected_opacity=self._paint_selection)
         self.place()
 
     def place(self, *_):
-        self.line.pos = (self.x + self.width / 2 - dp(9), self.y + dp(5))
+        width = min(dp(70), self.width)
+        position = (self.center_x - width / 2, self.y)
+        size = (width, self.height)
+        self.selected_shape.pos = self.selected_reflection.pos = position
+        self.selected_shape.size = self.selected_reflection.size = size
 
     def _style(self, *_):
         ink = self.tint("accent") if self.active or self.state == "down" else self.tint("text_dim")
-        self.marker.a = 1 if self.active else 0
         self.caption.color = self.glyph.ink = ink
         self.caption.bold = self.active
+        self.glyph.name = self.icon + "_active" if self.active and self.icon in ("home", "chat") else self.icon
         self.glyph.draw()
 
+    def _paint_selection(self, *_):
+        self.selected_fill.a = self.selected_opacity
+        self.selected_light.a = self.selected_opacity * .25
+
     def set_active(self, active):
+        if self.active == active:
+            return
         self.active = active
+        alpha = .6 if active else 0
+        Animation.cancel_all(self, "selected_opacity")
+        if _effects_level == "off":
+            self.selected_opacity = alpha
+        else:
+            Animation(selected_opacity=alpha, d=.18, t="out_quad").start(self)
         self._style()
 
     def on_release(self):
