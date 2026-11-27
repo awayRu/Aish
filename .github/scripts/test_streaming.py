@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 from threading import Event
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -54,6 +55,29 @@ class StreamingTests(unittest.TestCase):
         with patch.object(main, "_model_response", return_value=response):
             self.assertEqual(main._stream_request(None, pieces.append), ("Один два", None))
         self.assertEqual(pieces, ["Один", " два"])
+
+    def test_long_chat_draws_rows_in_the_scrolled_viewport(self):
+        layout = main.BoxLayout(orientation="vertical", size_hint_y=None, height=2000)
+        rows = []
+        for index in range(100):
+            widget = main.Widget(size_hint_y=None, height=20, y=index * 20)
+            layout.add_widget(widget)
+            rows.append(widget)
+        root = SimpleNamespace(messages_box=layout, scroll=SimpleNamespace(height=200, scroll_y=0))
+
+        main.ChatRoot._update_message_canvases(root)
+        self.assertIn(rows[0].canvas, layout.canvas.children)
+        self.assertNotIn(rows[-1].canvas, layout.canvas.children)
+        root.scroll.scroll_y = 1
+        main.ChatRoot._update_message_canvases(root)
+        self.assertNotIn(rows[0].canvas, layout.canvas.children)
+        self.assertIn(rows[-1].canvas, layout.canvas.children)
+        self.assertIs(rows[0].parent, layout)
+
+        layout.clear_widgets(rows[1:])
+        main.ChatRoot._update_message_canvases(root)
+        self.assertEqual(layout.children, rows[:1])
+        self.assertIn(rows[0].canvas, layout.canvas.children)
 
     def test_transport_error_keeps_partial_reply(self):
         response = Response([fragment("Полученная часть"), TimeoutError()])

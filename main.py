@@ -3953,6 +3953,9 @@ class ChatRoot(BoxLayout):
                                       spacing=msg_spacing(), padding=(dp(22), dp(15)))
         self.messages_box.bind(minimum_height=self.messages_box.setter("height"))
         self.scroll.add_widget(self.messages_box)
+        visible_messages = Clock.create_trigger(self._update_message_canvases, 0)
+        self.messages_box.bind(children=visible_messages, height=visible_messages, width=visible_messages)
+        self.scroll.bind(scroll_y=visible_messages, height=visible_messages)
         self.chat_layout.add_widget(self.scroll)
 
         self.bottom_bar = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(128), spacing=dp(0))
@@ -5670,6 +5673,25 @@ class ChatRoot(BoxLayout):
 
     def _scroll_changed(self, *_):
         self._at_bottom = self.scroll.scroll_y <= 0.025
+
+    def _update_message_canvases(self, *_):
+        # Keep row positions, text and touch behavior intact. Skip submitting
+        # graphics for rows that the ScrollView would clip out anyway.
+        rows = self.messages_box.children
+        canvas = self.messages_box.canvas
+        rendered = set(canvas.children)
+        height = self.scroll.height
+        offset = max(0, self.messages_box.height - height) * self.scroll.scroll_y
+        margin = height / 2
+        lower, upper = offset - margin, offset + height + margin
+        short_chat = len(rows) <= 80
+        for row in rows:
+            visible = short_chat or (row.top >= lower and row.y <= upper)
+            on_canvas = row.canvas in rendered
+            if visible and not on_canvas:
+                canvas.add(row.canvas)
+            elif not visible and on_canvas:
+                canvas.remove(row.canvas)
 
     def scroll_to_bottom(self, force=False):
         if not force and not STATE.get("auto_scroll", True):
