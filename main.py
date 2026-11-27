@@ -4143,16 +4143,16 @@ class ChatRoot(BoxLayout):
         page.bind(minimum_height=page.setter("height"))
         if GLASS_ASSET.is_file():
             self._welcome_art = GlassArtwork(GLASS_ASSET, T("bg_top"), size_hint_y=None,
-                                             height=dp(244), zoom=1.22)
+                                             height=dp(244), zoom=1.10)
             page.add_widget(self._welcome_art)
             self._resize_welcome()
             self._welcome_art.set_motion(self._motion_enabled())
         content = BoxLayout(orientation="vertical", padding=(dp(16), 0, dp(16), dp(7)),
                             spacing=dp(5), size_hint_y=None)
         content.bind(minimum_height=content.setter("height"))
-        greeting = AnchorLayout(size_hint_y=None, height=dp(36))
+        greeting = AnchorLayout(size_hint_y=None, height=dp(34))
         words = BoxLayout(size_hint_x=None, width=dp(170), spacing=dp(4))
-        words.add_widget(make_label("Привет!", 30, bold=True, halign="center"))
+        words.add_widget(make_label("Привет!", 28, bold=True, halign="center"))
         words.add_widget(KivyImage(source=str(ASSETS / "wave-hand.png"),
                                    size_hint_x=None, width=dp(26), allow_stretch=True, keep_ratio=True))
         greeting.add_widget(words)
@@ -4160,7 +4160,7 @@ class ChatRoot(BoxLayout):
         content.add_widget(make_label("Я Aish — твой умный\nAI-помощник", 15, "text_dim",
                                       halign="center", size_hint_y=None, height=dp(39)))
         content.add_widget(Widget(size_hint_y=None, height=dp(3)))
-        choices = GridLayout(cols=3, size_hint_y=None, height=dp(102), spacing=dp(12))
+        choices = GridLayout(cols=3, size_hint_y=None, height=dp(92), spacing=dp(12))
         shortcuts = (
             (("Новый\nчат", "chat", self._start_welcome_chat),
              ("Генерация\nизображений", "image", self.open_image_studio),
@@ -4197,11 +4197,15 @@ class ChatRoot(BoxLayout):
         page_dots.add_widget(dots)
         content.add_widget(page_dots)
         page.add_widget(content)
+        content.bind(height=self._resize_welcome)
+        self._resize_welcome()
         return page
 
     def _resize_welcome(self, *_):
-        if self._welcome_art:
-            self._welcome_art.height = min(dp(282), max(dp(98), self.scroll.height - dp(210)))
+        if self._welcome_art and self._welcome_art.parent:
+            page = self._welcome_art.parent
+            controls_height = sum(child.height for child in page.children if child is not self._welcome_art)
+            self._welcome_art.height = min(dp(282), max(dp(98), self.scroll.height - controls_height))
 
     def _start_welcome_chat(self):
         if not self.busy:
@@ -5765,7 +5769,7 @@ class ChatRoot(BoxLayout):
                             content = "Изображение создано. Нажми на картинку, чтобы открыть её."
                 self.add_message(role, content, ts=row["ts"][11:16], msg_id=row["id"],
                                  starred=bool(row.get("starred", 0)), interrupted=interrupted,
-                                 image_path=image_path, animate=False)
+                                 image_path=image_path, animate=False, auto_scroll=False)
         self._update_status()
         self._set_wave_context()
         self._refresh_bottom_layout()
@@ -5783,7 +5787,7 @@ class ChatRoot(BoxLayout):
                                                 size_hint_y=None, height=dp(24)))
 
     def add_message(self, role, text, ts="", msg_id=0, starred=False,
-                    interrupted=False, image_path="", animate=True):
+                    interrupted=False, image_path="", animate=True, auto_scroll=True):
         welcome = getattr(self, "_welcome_panel", None)
         if welcome is not None:
             self.title_lbl.text = "Диалог с Aish"
@@ -5813,7 +5817,8 @@ class ChatRoot(BoxLayout):
         self.messages_box.add_widget(bubble)
         if animate:
             Animation(opacity=1, d=0.20).start(bubble)
-        Clock.schedule_once(lambda *_: self.scroll_to_bottom(), 0.06)
+        if auto_scroll:
+            Clock.schedule_once(lambda *_: self.scroll_to_bottom(), 0.06)
         return bubble
 
     def _update_status(self):
