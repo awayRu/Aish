@@ -6506,13 +6506,11 @@ class ChatRoot(BoxLayout):
         if not path or not os.path.isfile(path):
             self.toast("Файл изображения не найден")
             return
-        popup = ModalView(size_hint=(0.98, 0.94), background_color=(0.015, 0.018, 0.030, 0.97),
-                          auto_dismiss=True)
-        outer = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
-        top = BoxLayout(size_hint=(1, None), height=dp(38), spacing=dp(8))
-        top.add_widget(make_label("Просмотр изображения", 15, bold=True))
-        top.add_widget(popup_button("×", popup.dismiss, "default", dp(36)))
-        outer.add_widget(top)
+        popup = RoundedPopup(size_hint=(0.96, 0.94))
+        top = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(8))
+        top.add_widget(make_label("Просмотр изображения", 16, bold=True))
+        top.add_widget(IconAction("", "close", popup.dismiss, self._nav_color, variant="outline"))
+        popup.container.add_widget(top)
         try:
             image_bytes = os.path.getsize(path)
             dimensions = ""
@@ -6526,13 +6524,33 @@ class ChatRoot(BoxLayout):
                                if image_bytes >= 1024 * 1024 else f"{max(1, image_bytes // 1024)} КБ")
         except OSError:
             image_size_label = os.path.basename(path)
-        outer.add_widget(make_label(image_size_label, 10, "text_dim",
-                                    size_hint=(1, None), height=dp(20)))
-        preview = KivyImage(source=path, allow_stretch=True, keep_ratio=True, size_hint=(1, 1))
-        outer.add_widget(preview)
-        outer.add_widget(popup_button("Сохранить в галерею", lambda: self.save_image_to_gallery(path), "accent", dp(46)))
-        outer.add_widget(popup_button("Закрыть", popup.dismiss, "default", dp(42)))
-        popup.add_widget(outer)
+        popup.container.add_widget(make_label(image_size_label, 11, "text_dim",
+                                              size_hint_y=None, height=dp(20)))
+        viewport = ScrollView(do_scroll_x=False, do_scroll_y=False, always_overscroll=False)
+        preview = KivyImage(source=path, allow_stretch=True, keep_ratio=True, size_hint=(None, None))
+        viewport.add_widget(preview)
+        popup.container.add_widget(viewport)
+        zoomed = False
+
+        def resize_preview(*_):
+            scale = 2 if zoomed else 1
+            preview.size = (viewport.width * scale, viewport.height * scale)
+
+        def toggle_zoom():
+            nonlocal zoomed
+            zoomed = not zoomed
+            viewport.do_scroll_x = viewport.do_scroll_y = zoomed
+            zoom.text = "Вписать" if zoomed else "Увеличить"
+            resize_preview()
+            viewport.scroll_x = viewport.scroll_y = .5
+
+        viewport.bind(size=resize_preview)
+        actions = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
+        zoom = popup_button("Увеличить", toggle_zoom, height=dp(46))
+        actions.add_widget(zoom)
+        actions.add_widget(popup_button("Сохранить", lambda: Clock.schedule_once(
+            lambda _: self.save_image_to_gallery(path), 0), "accent", dp(46)))
+        popup.container.add_widget(actions)
         popup.open()
 
     def save_image_to_gallery(self, path):
