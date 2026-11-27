@@ -9,8 +9,8 @@ source.exclude_dirs = .github,android_recipes
 source.exclude_patterns = android_build_hook.py,windows_launcher.py
 
 # Public app release version and Android in-place update code.
-version = 1.55
-android.numeric_version = 55
+version = 1.56
+android.numeric_version = 56
 
 # p4a installs pip requirements on the build host with --no-deps.
 # These universal wheels avoid host-native extensions and supply the Requests codecs.

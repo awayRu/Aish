@@ -44,7 +44,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "55"
+APP_VERSION = "56"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -3952,8 +3952,8 @@ class ChatRoot(BoxLayout):
         self.chat_layout.add_widget(header)
 
         self.scroll = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"],
-                                 bar_color=(*T("accent")[:3], .35), always_overscroll=False)
-        self.scroll.bind(scroll_y=self._scroll_changed)
+                                 bar_color=(*T("accent")[:3], .35), always_overscroll=False,
+                                 pos_hint={"x": 0, "y": 0})
         self.messages_box = BoxLayout(orientation="vertical", size_hint_y=None,
                                       spacing=msg_spacing(), padding=(dp(22), dp(15)))
         self.messages_box.bind(minimum_height=self.messages_box.setter("height"))
@@ -3961,7 +3961,16 @@ class ChatRoot(BoxLayout):
         visible_messages = Clock.create_trigger(self._update_message_canvases, 0)
         self.messages_box.bind(children=visible_messages, height=visible_messages, width=visible_messages)
         self.scroll.bind(scroll_y=visible_messages, height=visible_messages)
-        self.chat_layout.add_widget(self.scroll)
+        chat_view = FloatLayout()
+        chat_view.add_widget(self.scroll)
+        self.latest_message_button = IconAction("", "down", lambda: self.scroll_to_bottom(force=True),
+                                                self._nav_color, variant="outline", radius=22,
+                                                opacity=0, disabled=True,
+                                                pos_hint={"right": .96, "y": .025})
+        chat_view.add_widget(self.latest_message_button)
+        self.scroll.bind(scroll_y=self._scroll_changed, height=self._scroll_changed)
+        self.messages_box.bind(height=self._scroll_changed)
+        self.chat_layout.add_widget(chat_view)
 
         self.bottom_bar = BoxLayout(orientation="vertical", size_hint=(1, None), height=dp(128), spacing=dp(0))
         self.chips_scroll = ScrollView(size_hint=(1, None), height=dp(48), do_scroll_x=True, do_scroll_y=False, bar_width=0, scroll_type=["content"])
@@ -5693,7 +5702,11 @@ class ChatRoot(BoxLayout):
             print("[Keyboard] Initial measurement failed:", repr(exc))
 
     def _scroll_changed(self, *_):
-        self._at_bottom = self.scroll.scroll_y <= 0.025
+        remaining = max(0, self.messages_box.height - self.scroll.height) * self.scroll.scroll_y
+        self._at_bottom = remaining <= dp(24)
+        show_latest = not self._at_bottom and self._welcome_panel is None
+        self.latest_message_button.disabled = not show_latest
+        self.latest_message_button.opacity = int(show_latest)
 
     def _update_message_canvases(self, *_):
         # Keep row positions, text and touch behavior intact. Skip submitting
@@ -5719,7 +5732,10 @@ class ChatRoot(BoxLayout):
             return
         try:
             Animation.cancel_all(self.scroll, "scroll_y")
-            Animation(scroll_y=0, d=0.18).start(self.scroll)
+            if self._effects_level() == "off":
+                self.scroll.scroll_y = 0
+            else:
+                Animation(scroll_y=0, d=0.18).start(self.scroll)
         except Exception:
             self.scroll.scroll_y = 0
 
@@ -5975,7 +5991,7 @@ class ChatRoot(BoxLayout):
             return
         self._remove_typing()
         if self.stream_bubble is None:
-            self.stream_bubble = self.add_message("ai", "", animate=True)
+            self.stream_bubble = self.add_message("ai", "", auto_scroll=self._at_bottom)
         self.stream_bubble.append(piece)
         # One scroll adjustment per visible batch, only if the reader was already at bottom.
         if STATE.get("auto_scroll", True) and getattr(self, "_at_bottom", True):
@@ -6318,6 +6334,7 @@ class ChatRoot(BoxLayout):
             return
         self._remove_typing()
         bubble = self.stream_bubble
+        follow_reply = self._at_bottom
         self.stream_bubble = None
         if interrupted:
             final_text = (reply or (bubble.text if bubble else "")).strip()
@@ -6326,9 +6343,9 @@ class ChatRoot(BoxLayout):
                 bubble.msg_id = reply_id
                 self._replace_bubble(bubble, final_text or "Генерация остановлена.", reply_id, True)
             elif final_text:
-                self.add_message("ai", final_text, msg_id=reply_id, interrupted=True)
+                self.add_message("ai", final_text, msg_id=reply_id, interrupted=True, auto_scroll=follow_reply)
             else:
-                self.add_message("ai", "Генерация остановлена.")
+                self.add_message("ai", "Генерация остановлена.", auto_scroll=follow_reply)
             if reply and error and not (self.cancel_event and self.cancel_event.is_set()):
                 self.toast("Связь прервалась. Полученная часть ответа сохранена.")
         elif reply:
@@ -6338,7 +6355,7 @@ class ChatRoot(BoxLayout):
                 if reply_id and STATE["theme"] == "aurora":
                     self._add_mobile_reply_actions(bubble)
             else:
-                new_bubble = self.add_message("ai", "", msg_id=reply_id)
+                new_bubble = self.add_message("ai", "", msg_id=reply_id, auto_scroll=follow_reply)
                 new_bubble.reveal_text(reply)
             if STATE["voice_out"]:
                 self._speak_reply(reply)
@@ -6356,11 +6373,12 @@ class ChatRoot(BoxLayout):
                     self.messages_box.remove_widget(bubble)
                 except Exception:
                     pass
-            self.add_message("ai", message)
+            self.add_message("ai", message, auto_scroll=follow_reply)
         self._set_busy(False)
         self.cancel_event = None
         self.request_kind = None
-        self.scroll_to_bottom()
+        if follow_reply:
+            self.scroll_to_bottom()
 
     def _replace_bubble(self, old, text, msg_id, interrupted):
         try:
