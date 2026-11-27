@@ -44,7 +44,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "54"
+APP_VERSION = "55"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -4152,20 +4152,20 @@ class ChatRoot(BoxLayout):
             page.add_widget(self._welcome_art)
             self._resize_welcome()
             self._welcome_art.set_motion(self._motion_enabled())
-        content = BoxLayout(orientation="vertical", padding=(dp(16), 0, dp(16), dp(7)),
-                            spacing=dp(5), size_hint_y=None)
+        content = BoxLayout(orientation="vertical", padding=(dp(16), 0, dp(16), dp(4)),
+                            spacing=dp(4), size_hint_y=None)
         content.bind(minimum_height=content.setter("height"))
-        greeting = AnchorLayout(size_hint_y=None, height=dp(34))
+        greeting = AnchorLayout(size_hint_y=None, height=dp(30))
         words = BoxLayout(size_hint_x=None, width=dp(170), spacing=dp(4))
-        words.add_widget(make_label("Привет!", 28, bold=True, halign="center"))
+        words.add_widget(make_label("Привет!", 26, bold=True, halign="center"))
         words.add_widget(KivyImage(source=str(ASSETS / "wave-hand.png"),
                                    size_hint_x=None, width=dp(26), allow_stretch=True, keep_ratio=True))
         greeting.add_widget(words)
         content.add_widget(greeting)
-        content.add_widget(make_label("Я Aish — твой умный\nAI-помощник", 15, "text_dim",
-                                      halign="center", size_hint_y=None, height=dp(39)))
+        content.add_widget(make_label("Я Aish — твой умный\nAI-помощник", 14, "text_dim",
+                                      halign="center", size_hint_y=None, height=dp(34)))
         content.add_widget(Widget(size_hint_y=None, height=dp(3)))
-        choices = GridLayout(cols=3, size_hint_y=None, height=dp(92), spacing=dp(12))
+        choices = GridLayout(cols=3, size_hint_y=None, height=dp(89), spacing=dp(12))
         shortcuts = (
             (("Новый\nчат", "chat", self._start_welcome_chat),
              ("Генерация\nизображений", "image", self.open_image_studio),
@@ -4198,7 +4198,7 @@ class ChatRoot(BoxLayout):
             dots.add_widget(dot)
         show_shortcuts(0)
         content.add_widget(choices)
-        page_dots = AnchorLayout(size_hint_y=None, height=dp(23))
+        page_dots = AnchorLayout(size_hint_y=None, height=dp(17))
         page_dots.add_widget(dots)
         content.add_widget(page_dots)
         page.add_widget(content)
@@ -7360,13 +7360,22 @@ class ChatRoot(BoxLayout):
     def open_knowledge_base(self, *_args):
         """Local paste-in document library with bounded lexical retrieval for chat grounding."""
         popup = RoundedPopup(size_hint=(0.97, 0.95))
-        popup.container.add_widget(make_label("ЛОКАЛЬНАЯ БАЗА ЗНАНИЙ", 15, "text", True, size_hint=(1, None), height=dp(30)))
-        popup.container.add_widget(make_label("Вставь текст из TXT/MD/документа. Релевантные фрагменты могут добавляться в контекст чата. Это локальный поиск по словам, не векторная БД.", 8.8, "text_dim", size_hint=(1, None), height=dp(43), valign="top"))
-        title_in = TextInput(hint_text="Название источника", multiline=False, size_hint=(1, None), height=dp(40), font_size=sp(12), foreground_color=T("text"), hint_text_color=T("text_dim"), cursor_color=T("accent"), background_normal="", background_active="", background_color=T("panel2"), padding=(dp(10), dp(8)))
-        source_in = TextInput(text="Вставлено вручную", hint_text="Источник или путь (необязательно)", multiline=False, size_hint=(1, None), height=dp(36), font_size=sp(10), foreground_color=T("text"), hint_text_color=T("text_dim"), cursor_color=T("accent"), background_normal="", background_active="", background_color=T("panel2"), padding=(dp(10), dp(7)))
-        file_path_in = TextInput(hint_text="Путь к файлу: .txt, .md, .csv, .json, .html, .docx, .pptx, .xlsx, .pdf", multiline=False, size_hint=(1, None), height=dp(38), font_size=sp(10), foreground_color=T("text"), hint_text_color=T("text_dim"), cursor_color=T("accent"), background_normal="", background_active="", background_color=T("panel2"), padding=(dp(10), dp(7)))
-        content_in = TextInput(hint_text="Вставь фрагмент документа (до 50 000 символов)…", multiline=True, size_hint=(1, None), height=dp(135), font_size=sp(11), foreground_color=T("text"), hint_text_color=T("text_dim"), cursor_color=T("accent"), background_normal="", background_active="", background_color=T("panel2"), padding=(dp(10), dp(9)))
-        popup.container.add_widget(title_in); popup.container.add_widget(source_in); popup.container.add_widget(file_path_in); popup.container.add_widget(content_in)
+        popup.container.add_widget(make_label("Локальная база знаний", 19, bold=True,
+                                              size_hint_y=None, height=dp(36)))
+        viewport = ScrollView(do_scroll_x=False, bar_width=dp(2), always_overscroll=False)
+        form = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(8))
+        form.bind(minimum_height=form.setter("height"))
+        viewport.add_widget(form)
+        popup.container.add_widget(viewport)
+        form.add_widget(make_label("Добавь документ или вставь текст. Найденные фрагменты могут использоваться в чате.",
+                                   12, "text_dim", size_hint_y=None, height=dp(47)))
+        title_in = self._mobile_field("Название источника", 42)
+        source_in = self._mobile_field("Источник или путь", 42, text="Вставлено вручную")
+        file_path_in = self._mobile_field("Путь к файлу", 42)
+        content_in = self._mobile_field("Фрагмент документа", 115, multiline=True)
+        for field in (title_in, source_in, file_path_in, content_in):
+            form.add_widget(field)
+
         def load_document(path, open_source=None, filename=None):
             if import_button.disabled:
                 return
@@ -7429,7 +7438,7 @@ class ChatRoot(BoxLayout):
                     self.toast("Укажи полный путь к документу")
 
         import_button = popup_button("Выбрать документ и загрузить текст", import_file, "default", dp(39))
-        popup.container.add_widget(import_button)
+        form.add_widget(import_button)
         def add_doc(*_):
             try:
                 db_knowledge_add(title_in.text, content_in.text, source_in.text or "Вставлено вручную")
@@ -7437,15 +7446,25 @@ class ChatRoot(BoxLayout):
                 self.toast("Источник добавлен в локальную базу знаний")
                 render_docs()
             except Exception as exc: self.toast(str(exc)[:120])
-        popup.container.add_widget(popup_button("Добавить источник", add_doc, "accent", dp(42)))
-        query = TextInput(hint_text="Проверить поиск: введи ключевые слова…", multiline=False, size_hint=(1, None), height=dp(38), font_size=sp(11), foreground_color=T("text"), hint_text_color=T("text_dim"), cursor_color=T("accent"), background_normal="", background_active="", background_color=T("panel2"), padding=(dp(10), dp(8)))
-        result = TextInput(text="Результаты локального поиска появятся здесь.", readonly=True, multiline=True, size_hint=(1, None), height=dp(90), font_size=sp(10), foreground_color=T("text_dim"), cursor_color=T("accent"), background_normal="", background_active="", background_color=T("panel"), padding=(dp(8), dp(8)) )
+        form.add_widget(popup_button("Добавить источник", add_doc, "accent", dp(42)))
+        query = self._mobile_field("Поиск по источникам", 42)
+        result = self._mobile_field(height=90, multiline=True, readonly=True,
+                                    text="Результаты локального поиска появятся здесь.")
+
         def test_search(*_):
             result.text = db_knowledge_retrieve(query.text, max_chars=2400, max_chunks=3) or "Совпадений не найдено. Добавь больше текста или измени запрос."
-        search_row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(40), spacing=dp(6)); search_row.add_widget(query); search_row.add_widget(popup_button("Найти", test_search, "default", dp(38)))
-        popup.container.add_widget(search_row); popup.container.add_widget(result)
-        doc_list = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(5), padding=(0, dp(3))); doc_list.bind(minimum_height=doc_list.setter("height"))
-        doc_scroll = ScrollView(do_scroll_x=False, bar_width=dp(2), scroll_type=["bars", "content"], size_hint=(1, None), height=dp(95)); doc_scroll.add_widget(doc_list); popup.container.add_widget(doc_scroll)
+        search_row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(8))
+        search_row.add_widget(query)
+        search_button = popup_button("Найти", test_search, height=dp(42))
+        search_button.size_hint_x = None
+        search_button.width = dp(86)
+        search_row.add_widget(search_button)
+        form.add_widget(search_row)
+        form.add_widget(result)
+        doc_list = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(5))
+        doc_list.bind(minimum_height=doc_list.setter("height"))
+        form.add_widget(doc_list)
+
         def render_docs():
             doc_list.clear_widgets()
             docs = db_knowledge_items(60)
