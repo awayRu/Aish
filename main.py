@@ -24,6 +24,7 @@ import ssl
 import socket
 import threading
 import time
+from tempfile import TemporaryDirectory
 import uuid
 import ast
 import operator
@@ -43,7 +44,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "53"
+APP_VERSION = "54"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -96,7 +97,7 @@ from aish_mobile import (ASSETS, UI_FONT, IconAction, CardButton, ComposerInput,
                          Glyph, NavButton, PALETTE, ProgressDial, hairline, jade_waves, panel,
                          set_effects, surface)
 from aish_media import (ImageServiceUnavailable, OVH_API, PHOTO_SUFFIXES, create_horde_picture,
-                        create_picture, prepare_photo, store_photo, vision_content)
+                        create_picture, export_android_picture, prepare_photo, store_photo, vision_content)
 from aish_storage import data_directory
 
 # Android keyboard handling:
@@ -1115,15 +1116,19 @@ def extract_document_text(path, max_bytes=8 * 1024 * 1024):
     if ext in (".docx", ".pptx", ".xlsx"):
         try:
             with zipfile.ZipFile(path, "r") as archive:
-                names = archive.namelist()
-                wanted = [n for n in names if n.startswith(("word/", "ppt/slides/", "xl/worksheets/", "xl/sharedStrings.xml")) and n.endswith(".xml")]
+                wanted = [entry for entry in archive.infolist()
+                          if entry.filename.startswith(("word/", "ppt/slides/", "xl/worksheets/", "xl/sharedStrings.xml"))
+                          and entry.filename.endswith(".xml")]
                 if len(wanted) > 500:
                     raise ValueError("В документе слишком много XML-частей.")
+                if sum(entry.file_size for entry in wanted) > 32 * 1024 * 1024:
+                    raise ValueError("Распакованные данные документа больше 32 МБ.")
                 chunks = []
-                for name in sorted(wanted):
+                for entry in sorted(wanted, key=lambda member: member.filename):
+                    name = entry.filename
                     if name.startswith("word/") and not name.startswith("word/document.xml") and not name.startswith("word/header") and not name.startswith("word/footer"):
                         continue
-                    root = ET.fromstring(archive.read(name))
+                    root = ET.fromstring(archive.read(entry))
                     vals = [el.text or "" for el in root.iter() if el.tag.rsplit("}", 1)[-1] in ("t", "v") and (el.text or "").strip()]
                     if vals:
                         chunks.append("\n".join(vals))
@@ -3783,7 +3788,7 @@ class ChatRoot(BoxLayout):
             Window.unbind(on_keyboard=self._desktop_commands)
         if self._welcome_art:
             self._welcome_art.set_motion(False)
-        for attr in ("_voice_callback", "_photo_callback"):
+        for attr in ("_voice_callback", "_file_callback"):
             callback = getattr(self, attr, None)
             if callback:
                 try:
@@ -4292,7 +4297,7 @@ class ChatRoot(BoxLayout):
             self.toast("Заверши текущий ответ перед выбором фото")
             return
         if kivy_platform == "android":
-            self._choose_android_photo()
+            self._choose_android_file("image/*", self._queue_photo)
             return
         try:
             from tkinter import Tk, filedialog
@@ -4310,8 +4315,8 @@ class ChatRoot(BoxLayout):
         if path:
             self._open_photo_path(path)
 
-    def _choose_android_photo(self):
-        if getattr(self, "_photo_callback", None):
+    def _choose_android_file(self, mime, selected):
+        if getattr(self, "_file_callback", None):
             return
         try:
             from android import activity
@@ -4328,10 +4333,10 @@ class ChatRoot(BoxLayout):
                 Clock.schedule_once(lambda *_: receive(result, data), 0)
 
             def receive(result, data):
-                if self._photo_callback is not finish:
+                if self._file_callback is not finish:
                     return
                 activity.unbind(on_activity_result=finish)
-                self._photo_callback = None
+                self._file_callback = None
                 if result != -1 or not data:
                     return
                 uri = data.getData()
@@ -4341,29 +4346,41 @@ class ChatRoot(BoxLayout):
                 def open_source():
                     handle = resolver.openFileDescriptor(uri, "r")
                     if handle is None:
-                        raise OSError("Нет доступа к выбранному фото.")
+                        raise OSError("Нет доступа к выбранному файлу.")
                     fd = handle.detachFd()
                     return os.fdopen(fd, "rb")
 
-                self._queue_photo(open_source, "Фото из галереи")
+                name = "Фото из галереи" if mime == "image/*" else ""
+                if mime != "image/*":
+                    try:
+                        cursor = resolver.query(uri, ["_display_name"], None, None, None)
+                        if cursor is not None:
+                            try:
+                                if cursor.moveToFirst():
+                                    name = str(cursor.getString(0) or "")
+                            finally:
+                                cursor.close()
+                    except Exception:
+                        pass
+                selected(open_source, name)
 
             @run_on_ui_thread
             def launch():
                 try:
                     intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
                     intent.addCategory(Intent.CATEGORY_OPENABLE)
-                    intent.setType("image/*")
+                    intent.setType(mime)
                     native.startActivityForResult(intent, request_code)
                 except Exception:
                     activity.unbind(on_activity_result=finish)
-                    self._photo_callback = None
-                    Clock.schedule_once(lambda *_: self.toast("Не удалось открыть галерею"), 0)
+                    self._file_callback = None
+                    Clock.schedule_once(lambda *_: self.toast("Не удалось открыть системный выбор файла"), 0)
 
-            self._photo_callback = finish
+            self._file_callback = finish
             activity.bind(on_activity_result=finish)
             launch()
         except (ImportError, AttributeError, RuntimeError):
-            self.toast("Не удалось открыть системный выбор фото")
+            self.toast("Не удалось открыть системный выбор файла")
 
     def _send_photo(self, text):
         photo = self._pending_photo
@@ -6522,8 +6539,46 @@ class ChatRoot(BoxLayout):
         if not path or not os.path.isfile(path):
             self.toast("Файл изображения не найден")
             return
-        candidates = [os.path.join("/storage/emulated/0/Pictures", "AI Chat"),
-                      os.path.join(DATA_DIR, "exported_images")]
+        if kivy_platform == "android":
+            try:
+                from jnius import autoclass
+                if autoclass("android.os.Build$VERSION").SDK_INT >= 29:
+                    def publish():
+                        try:
+                            export_android_picture(path)
+                        except Exception:
+                            message = "Галерея недоступна. Изображение осталось в чате."
+                        else:
+                            message = "Сохранено в галерею · Pictures/Aish"
+                        Clock.schedule_once(lambda _: self.toast(message), 0)
+
+                    threading.Thread(target=publish, name="aish-publish-picture", daemon=True).start()
+                    return
+            except (ImportError, AttributeError, RuntimeError):
+                pass
+        elif kivy_platform == "win":
+            try:
+                from tkinter import Tk, filedialog
+                dialog = Tk()
+                dialog.withdraw()
+                dialog.attributes("-topmost", True)
+                try:
+                    target = filedialog.asksaveasfilename(parent=dialog, title="Сохранить изображение",
+                        initialfile=os.path.basename(path), defaultextension=Path(path).suffix)
+                finally:
+                    dialog.destroy()
+                if target and os.path.normcase(os.path.abspath(target)) != os.path.normcase(os.path.abspath(path)):
+                    shutil.copy2(path, target)
+                    self.toast("Сохранено: " + target)
+                return
+            except OSError:
+                self.toast("Не удалось сохранить изображение в выбранную папку")
+                return
+            except Exception:
+                pass
+        candidates = [os.path.join(DATA_DIR, "exported_images")]
+        if kivy_platform == "android":
+            candidates.insert(0, os.path.join("/storage/emulated/0/Pictures", "AI Chat"))
         for folder in candidates:
             try:
                 os.makedirs(folder, exist_ok=True)
@@ -7294,17 +7349,69 @@ class ChatRoot(BoxLayout):
         file_path_in = TextInput(hint_text="Путь к файлу: .txt, .md, .csv, .json, .html, .docx, .pptx, .xlsx, .pdf", multiline=False, size_hint=(1, None), height=dp(38), font_size=sp(10), foreground_color=T("text"), hint_text_color=T("text_dim"), cursor_color=T("accent"), background_normal="", background_active="", background_color=T("panel2"), padding=(dp(10), dp(7)))
         content_in = TextInput(hint_text="Вставь фрагмент документа (до 50 000 символов)…", multiline=True, size_hint=(1, None), height=dp(135), font_size=sp(11), foreground_color=T("text"), hint_text_color=T("text_dim"), cursor_color=T("accent"), background_normal="", background_active="", background_color=T("panel2"), padding=(dp(10), dp(9)))
         popup.container.add_widget(title_in); popup.container.add_widget(source_in); popup.container.add_widget(file_path_in); popup.container.add_widget(content_in)
-        def import_file(*_):
-            try:
-                path = file_path_in.text.strip()
-                extracted = extract_document_text(path)
-                title_in.text = title_in.text.strip() or os.path.basename(path)
-                source_in.text = path
+        def load_document(path, open_source=None, filename=None):
+            if import_button.disabled:
+                return
+            import_button.disabled = True
+
+            def apply(extracted=None, error=None):
+                import_button.disabled = False
+                if popup.parent is None:
+                    return
+                if error:
+                    self.toast("Импорт файла: " + error)
+                    return
+                title_in.text = title_in.text.strip() or filename or os.path.basename(path)
+                source_in.text = filename or path
                 content_in.text = extracted[:50000]
                 self.toast(f"Извлечено символов: {len(extracted)}. Проверь текст и нажми «Добавить источник».")
-            except Exception as exc:
-                self.toast("Импорт файла: " + str(exc)[:120])
-        popup.container.add_widget(popup_button("Загрузить текст из файла", import_file, "default", dp(39)))
+
+            def worker():
+                try:
+                    if open_source is None:
+                        extracted = extract_document_text(path)
+                    else:
+                        suffix = Path(filename or "").suffix.casefold()
+                        if not suffix:
+                            raise ValueError("У выбранного файла нет расширения.")
+                        with TemporaryDirectory(prefix="aish-document-", dir=DATA_DIR) as folder:
+                            document = Path(folder) / ("document" + suffix)
+                            with open_source() as source:
+                                data = source.read(8 * 1024 * 1024 + 1)
+                            if len(data) > 8 * 1024 * 1024:
+                                raise ValueError("Файл больше 8 МБ. Раздели его на части.")
+                            document.write_bytes(data)
+                            extracted = extract_document_text(document)
+                    Clock.schedule_once(lambda _: apply(extracted=extracted), 0)
+                except Exception as exc:
+                    error = str(exc)[:120]
+                    Clock.schedule_once(lambda _: apply(error=error), 0)
+
+            threading.Thread(target=worker, name="aish-import-document", daemon=True).start()
+
+        def import_file():
+            path = file_path_in.text.strip()
+            if path:
+                load_document(path)
+            elif kivy_platform == "android":
+                self._choose_android_file("*/*", lambda source, name: load_document("", source, name))
+            else:
+                try:
+                    from tkinter import Tk, filedialog
+                    dialog = Tk()
+                    dialog.withdraw()
+                    dialog.attributes("-topmost", True)
+                    try:
+                        path = filedialog.askopenfilename(parent=dialog, title="Выбери документ")
+                    finally:
+                        dialog.destroy()
+                    if path:
+                        load_document(path)
+                except Exception:
+                    self.toast("Укажи полный путь к документу")
+
+        import_button = popup_button("Выбрать документ и загрузить текст", import_file, "default", dp(39))
+        popup.container.add_widget(import_button)
         def add_doc(*_):
             try:
                 db_knowledge_add(title_in.text, content_in.text, source_in.text or "Вставлено вручную")

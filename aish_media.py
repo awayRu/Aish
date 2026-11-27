@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from http.client import HTTPException, HTTPSConnection
 from io import BytesIO
 import json
+import mimetypes
+import os
 from pathlib import Path
+from shutil import copyfileobj
 import time
 from urllib.parse import urlsplit
 import uuid
@@ -90,6 +93,41 @@ def _write_image(directory, prefix, suffix, data):
 
 def store_photo(photo, directory):
     return str(_write_image(directory, "aish_photo_", ".jpg", photo.jpeg))
+
+
+def export_android_picture(path):
+    """Publish a complete copy in the Android system gallery on Android 10+."""
+    from jnius import autoclass
+
+    path = Path(path)
+    activity = autoclass("org.kivy.android.PythonActivity").mActivity
+    resolver = activity.getContentResolver()
+    media = autoclass("android.provider.MediaStore$Images$Media")
+    values = autoclass("android.content.ContentValues")()
+    values.put("_display_name", path.name)
+    values.put("mime_type", mimetypes.guess_type(path.name)[0] or "image/jpeg")
+    values.put("relative_path", "Pictures/Aish")
+    values.put("is_pending", "1")
+    uri = resolver.insert(media.EXTERNAL_CONTENT_URI, values)
+    if uri is None:
+        raise OSError("Галерея не приняла изображение.")
+    try:
+        with path.open("rb") as source:
+            descriptor = resolver.openFileDescriptor(uri, "w")
+            if descriptor is None:
+                raise OSError("Не удалось открыть файл галереи.")
+            with os.fdopen(descriptor.detachFd(), "wb") as target:
+                copyfileobj(source, target)
+        values.clear()
+        values.put("is_pending", "0")
+        if resolver.update(uri, values, None, None) != 1:
+            raise OSError("Галерея не завершила сохранение.")
+    except Exception:
+        try:
+            resolver.delete(uri, None, None)
+        except Exception:
+            pass
+        raise
 
 
 def vision_content(text, path):
