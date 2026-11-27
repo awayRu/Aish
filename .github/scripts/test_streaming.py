@@ -36,6 +36,18 @@ def fragment(text):
 
 
 class StreamingTests(unittest.TestCase):
+    def test_copy_preserves_indentation_of_closed_code_fences(self):
+        code = {}
+        text = "Ссылка [документация](https://example.com)\n```python\r\nif ready:\r\n    start()\r\n```\n```text\nчасть"
+        markup, links = main.render_markdown(text, code_blocks=code)
+        self.assertIn("[ref=mdcode0]", markup)
+        self.assertEqual(code, {"mdcode0": "if ready:\n    start()"})
+        self.assertEqual(links, {"mdlink0": "https://example.com"})
+        main.render_markdown("````md\n```python\nprint(42)\n```\n````\n", code_blocks=code)
+        self.assertEqual(code, {"mdcode0": "```python\nprint(42)\n```"})
+        main.render_markdown("Другой ответ", code_blocks=code)
+        self.assertEqual(code, {})
+
     def test_reads_utf8_chunks(self):
         pieces = []
         response = Response([fragment("Один"), fragment(" два"), b"data: [DONE]\n"])
@@ -63,4 +75,7 @@ class StreamingTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    try:
+        unittest.main()
+    finally:
+        main.DB.close()

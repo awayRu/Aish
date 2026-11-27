@@ -43,7 +43,7 @@ from datetime import datetime as DT
 from html.parser import HTMLParser
 
 # App version used by the in-app GitHub Releases checker. Bump this per release.
-APP_VERSION = "52"
+APP_VERSION = "53"
 UPDATE_API_URL = "https://api.github.com/repos/awayRu/Aish/releases/latest"
 
 
@@ -1471,6 +1471,7 @@ _MARKDOWN_HR_RE = re.compile(r"^\s{0,3}([-*_]\s*){3,}$")
 _MARKDOWN_QUOTE_RE = re.compile(r"^\s{0,3}>\s?(.*)$")
 _MARKDOWN_BULLET_RE = re.compile(r"^(\s*)([-*+]\s+|\d+[.)]\s+)(.*)$")
 _MARKDOWN_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
+_MARKDOWN_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
 _MARKDOWN_CALLOUT_RE = re.compile(r"^\s*(Важно|Внимание|Предупреждение|Осторожно|Примечание|Итог|Вывод|Ответ)\s*:\s*(.*)$", re.I)
 _MARKDOWN_TITLE_LINE_RE = re.compile(r"^\s*(Главный вывод|Краткая аналогия|Коротко|Итог|Вывод|Пример|Пошагово|Что важно)\s*:?[\s.!]*$", re.I)
 
@@ -1485,7 +1486,7 @@ def _markdown_table_cells(line):
     return [part.replace(r"\|", "|").strip() for part in re.split(r"(?<!\\)\|", value)]
 
 
-def render_markdown(text, base_size=None):
+def render_markdown(text, base_size=None, *, code_blocks=None):
     """Render a safe mobile-friendly Markdown subset as Kivy Label markup.
 
     Wide Markdown tables are converted to readable stacked rows on phones instead of
@@ -1544,27 +1545,40 @@ def render_markdown(text, base_size=None):
 
     lines = raw.split("\n")
     output = []
-    in_code = False
+    fence = ""
+    code_lines = []
     code_line_no = 0
+    if code_blocks is not None:
+        code_blocks.clear()
     i = 0
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
-        if stripped.startswith("```"):
-            in_code = not in_code
+        marker = _MARKDOWN_FENCE_RE.fullmatch(line)
+        closes_fence = bool(fence and marker and marker[1][0] == fence[0]
+                            and len(marker[1]) >= len(fence) and not marker[2].strip())
+        if marker and (not fence or closes_fence):
             code_line_no = 0
-            hint = stripped[3:].strip()
-            if in_code:
+            if not fence:
+                fence, hint = marker[1], marker[2].strip()
+                code_lines.clear()
                 append_spacer()
                 if hint:
                     output.append("[color={}][size={}][b]  {}[/b][/size][/color]".format(
                         muted, max(1, round(size * 0.78)), _kivy_escape(hint.upper())))
             else:
+                fence = ""
+                if code_blocks is not None and code_lines:
+                    ref = f"mdcode{len(code_blocks)}"
+                    code_blocks[ref] = "\n".join(code_lines)
+                    output.append(f"[ref={ref}][color={accent}][u]Копировать код[/u][/color][/ref]")
                 output.append("")
             i += 1
             continue
-        if in_code:
+        if fence:
             code_line_no += 1
+            if code_blocks is not None:
+                code_lines.append(line)
             # Line counters help with long code while keeping everything in one low-cost Label.
             output.append("[color={}][font={}][size={}] {:02d} [/size][/font][/color]"
                           "[color={}][font={}][size={}]{}[/size][/font][/color]".format(
@@ -3348,7 +3362,7 @@ class MessageBubble(BoxLayout):
 
     def __init__(self, role, text, ts="", msg_id=0, starred=False,
                  interrupted=False, image_path="", on_action=None,
-                 on_long=None, on_image=None, **kwargs):
+                 on_long=None, on_image=None, on_copy=None, **kwargs):
         super().__init__(orientation="horizontal", size_hint=(1, None),
                          padding=(dp(6), dp(3)), spacing=dp(5), **kwargs)
         self.role = role
@@ -3360,6 +3374,7 @@ class MessageBubble(BoxLayout):
         self.on_action_cb = on_action
         self.on_long_cb = on_long
         self.on_image_cb = on_image
+        self.on_copy_cb = on_copy
         self._press_event = None
         self._long_fired = False
         self._touch_origin = None
@@ -3371,6 +3386,7 @@ class MessageBubble(BoxLayout):
         self._stream_markdown_prefix_len = 0
         self._stream_markdown_prefix = ""
         self._stream_markdown_refresh_at = 0.0
+        self._markdown_code = {} if on_copy else None
         self._height_update_scheduled = False
         self._reveal_target = ""
         self._reveal_pos = 0
@@ -3413,7 +3429,7 @@ class MessageBubble(BoxLayout):
             lines = self.text[:1200].splitlines() or [""]
             self._preferred_width = max(dp(92), max(measure.get_extents(line)[0] for line in lines) + dp(31))
         fg = T("bubble_text") if self._user_mint else ((1, 1, 1, 1) if is_me else T("text"))
-        formatted, self._markdown_links = render_markdown(self.text, F("body"))
+        formatted, self._markdown_links = render_markdown(self.text, F("body"), code_blocks=self._markdown_code)
         self.body = Label(text=formatted, color=fg,
                           font_name=font_path(), font_size=F("body"),
                           bold=STATE["font_weight"] == "bold",
@@ -3516,7 +3532,7 @@ class MessageBubble(BoxLayout):
 
     def set_text(self, text, force_update=True):
         self.text = text or ""
-        formatted, self._markdown_links = render_markdown(self.text, F("body"))
+        formatted, self._markdown_links = render_markdown(self.text, F("body"), code_blocks=self._markdown_code)
         self._stream_markdown_prefix = formatted
         self._stream_markdown_prefix_len = len(self.text)
         self.body.font_name = font_path()
@@ -3529,6 +3545,9 @@ class MessageBubble(BoxLayout):
         self._schedule_height_update()
 
     def _open_markdown_link(self, _label, ref):
+        if self._markdown_code is not None and ref in self._markdown_code:
+            self.on_copy_cb(self._markdown_code[ref])
+            return
         url = self._markdown_links.get(str(ref), "")
         if url:
             try:
@@ -3558,7 +3577,8 @@ class MessageBubble(BoxLayout):
                     stable_end = boundary + 1
             if stable_end > self._stream_markdown_prefix_len:
                 prefix = self.text[:stable_end]
-                self._stream_markdown_prefix, self._markdown_links = render_markdown(prefix, F("body"))
+                self._stream_markdown_prefix, self._markdown_links = render_markdown(
+                    prefix, F("body"), code_blocks=self._markdown_code)
                 self._stream_markdown_prefix_len = stable_end
                 self._stream_markdown_refresh_at = now
 
@@ -3584,6 +3604,8 @@ class MessageBubble(BoxLayout):
         self._stream_markdown_prefix_len = 0
         self._stream_markdown_refresh_at = 0.0
         self._markdown_links = {}
+        if self._markdown_code is not None:
+            self._markdown_code.clear()
         self.body.text = ""
         self._schedule_height_update()
         self._reveal_event = Clock.schedule_once(self._reveal_tick, 1.0 / 30.0)
@@ -4117,7 +4139,8 @@ class ChatRoot(BoxLayout):
         page = BoxLayout(orientation="vertical", size_hint_y=None)
         page.bind(minimum_height=page.setter("height"))
         if GLASS_ASSET.is_file():
-            self._welcome_art = GlassArtwork(GLASS_ASSET, T("bg_top"), size_hint_y=None, height=dp(244), zoom=1.10)
+            self._welcome_art = GlassArtwork(GLASS_ASSET, T("bg_top"), size_hint_y=None,
+                                             height=dp(244), zoom=1.22)
             page.add_widget(self._welcome_art)
             self._resize_welcome()
             self._welcome_art.set_motion(self._motion_enabled())
@@ -4175,7 +4198,7 @@ class ChatRoot(BoxLayout):
 
     def _resize_welcome(self, *_):
         if self._welcome_art:
-            self._welcome_art.height = min(dp(282), max(dp(98), self.scroll.height - dp(215)))
+            self._welcome_art.height = min(dp(282), max(dp(98), self.scroll.height - dp(210)))
 
     def _start_welcome_chat(self):
         if not self.busy:
@@ -5760,7 +5783,7 @@ class ChatRoot(BoxLayout):
                                interrupted=interrupted, image_path=image_path,
                                on_action=self.open_message_actions,
                                on_long=self.open_quick_actions,
-                               on_image=self.show_image)
+                               on_image=self.show_image, on_copy=self.copy_text)
         if STATE["theme"] == "aurora" and role == "ai" and msg_id:
             self._add_mobile_reply_actions(bubble)
         if animate:
@@ -6304,7 +6327,8 @@ class ChatRoot(BoxLayout):
             new = MessageBubble("ai", text, ts=old_ts, msg_id=msg_id, starred=old_starred,
                                 interrupted=interrupted, image_path=getattr(old, "image_path", ""),
                                 on_action=self.open_message_actions,
-                                on_long=self.open_quick_actions, on_image=self.show_image)
+                                on_long=self.open_quick_actions, on_image=self.show_image,
+                                on_copy=self.copy_text)
             self.messages_box.add_widget(new, index=min(index, len(self.messages_box.children)))
         except Exception:
             pass
