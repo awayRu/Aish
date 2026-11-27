@@ -3369,7 +3369,7 @@ class GlassImagePreview(FloatLayout):
     def __init__(self, path, open_image, save_image, **kwargs):
         super().__init__(**kwargs)
         surface(self, T("panel"), (*T("accent")[:3], .33), 18, material="frosted")
-        image = PreviewImage(path, callback=open_image, size_hint=(.97, .94),
+        image = PreviewImage(path, callback=open_image, size_hint=(.98, .96),
                              pos_hint={"center_x": .5, "center_y": .5})
         self.add_widget(image)
         actions = BoxLayout(size_hint=(None, None), size=(dp(78), dp(36)), spacing=dp(6),
@@ -3424,26 +3424,37 @@ class MessageBubble(BoxLayout):
         show_avatars = STATE["show_avatars"]
         self._eclipse = STATE["theme"] == "aurora"
         self._jade_mobile = jade_mobile()
-        body_size = F("body") * (.94 if self._jade_mobile else 1)
+        body_size = self._body_font_size()
+        has_image = self.image_path and os.path.isfile(self.image_path)
+        self._wide_attachment = self._jade_mobile and bool(has_image)
         if self._eclipse:
             self.padding = (0, dp(2))
             self.spacing = dp(9)
 
+        if self._wide_attachment:
+            self.orientation = "vertical"
+            self.spacing = dp(5)
+            self.body_row = BoxLayout(size_hint_y=None, spacing=dp(9))
+            self.add_widget(self.body_row)
+            self.bind(minimum_height=self.setter("height"))
+        else:
+            self.body_row = self
+
         # Flexible space aligns assistant messages left and user messages right.
         if is_me:
-            self.add_widget(Widget(size_hint_x=1))
+            self.body_row.add_widget(Widget(size_hint_x=1))
         elif show_avatars and self._eclipse:
             avatar = AnchorLayout(anchor_y="top", size_hint_x=None, width=dp(39), padding=(0, dp(4), 0, 0))
             emblem = GlassArtwork(GLASS_ASSET, size_hint=(None, None), size=(dp(39), dp(39)))
             panel(emblem, T("chip"), T("panel3"), radius=20)
             avatar.add_widget(emblem)
-            self.add_widget(avatar)
+            self.body_row.add_widget(avatar)
         elif show_avatars:
-            self.add_widget(Avatar("AI", T("avatar_ai"), size_px=dp(25)))
+            self.body_row.add_widget(Avatar("AI", T("avatar_ai"), size_px=dp(25)))
         else:
-            self.add_widget(Widget(size_hint=(None, None), size=(dp(3), dp(1))))
+            self.body_row.add_widget(Widget(size_hint=(None, None), size=(dp(3), dp(1))))
 
-        bubble_pad = (dp(13), dp(8)) if self._jade_mobile else (dp(15), dp(11))
+        bubble_pad = (dp(14), dp(6)) if self._jade_mobile else (dp(15), dp(11))
         self.bubble = BoxLayout(orientation="vertical", size_hint=(None, None), spacing=dp(4),
                                 padding=bubble_pad if self._eclipse else (dp(12), dp(8)))
         self.bubble.bind(minimum_height=self.bubble.setter("height"))
@@ -3464,10 +3475,9 @@ class MessageBubble(BoxLayout):
                           font_name=font_path(), font_size=body_size,
                           bold=STATE["font_weight"] == "bold",
                           size_hint=(1, None), halign="left", valign="top",
-                          line_height=1.02 if self._jade_mobile else 1.12, markup=True, shorten=False)
+                          line_height=1 if self._jade_mobile else 1.12, markup=True, shorten=False)
         self.body.bind(width=self._body_width, texture_size=self._body_texture)
         self.body.bind(on_ref_press=self._open_markdown_link)
-        has_image = self.image_path and os.path.isfile(self.image_path)
         if self.text or not (self._jade_mobile and has_image):
             self.bubble.add_widget(self.body)
 
@@ -3513,16 +3523,16 @@ class MessageBubble(BoxLayout):
         self.bubble_stack.bind(minimum_height=self.bubble_stack.setter("height"), height=self._update_height)
         self.bubble.bind(width=self.bubble_stack.setter("width"))
         self.bubble_stack.add_widget(self.bubble)
-        if self._jade_mobile and self.image_preview is not None:
-            self.bubble_stack.add_widget(self.image_preview)
-        self.add_widget(self.bubble_stack)
+        self.body_row.add_widget(self.bubble_stack)
+        if self._wide_attachment:
+            self.add_widget(self.image_preview)
 
         if is_me and show_avatars and not self._eclipse:
-            self.add_widget(Avatar("Я", T("avatar_me"), size_px=dp(31)))
+            self.body_row.add_widget(Avatar("Я", T("avatar_me"), size_px=dp(31)))
         elif is_me and not self._eclipse:
-            self.add_widget(Widget(size_hint=(None, None), size=(dp(3), dp(1))))
+            self.body_row.add_widget(Widget(size_hint=(None, None), size=(dp(3), dp(1))))
         elif not is_me:
-            self.add_widget(Widget(size_hint_x=1))
+            self.body_row.add_widget(Widget(size_hint_x=1))
 
         self.bind(width=self._layout_width)
         Clock.schedule_once(self._layout_width, 0)
@@ -3540,8 +3550,8 @@ class MessageBubble(BoxLayout):
         if self._preferred_width:
             self.bubble.width = min(self.bubble.width, self._preferred_width)
         if self.image_preview is not None:
-            if self._jade_mobile:
-                self.image_preview.height = min(dp(255), max(dp(110), self.bubble.width * .53))
+            if self._wide_attachment:
+                self.image_preview.height = min(dp(300), max(dp(95), self.width * .48))
             else:
                 self.image_preview.height = min(dp(230), max(dp(150), self.bubble.width - dp(24)))
         self._body_width(self.body, self.body.width)
@@ -3566,18 +3576,26 @@ class MessageBubble(BoxLayout):
 
     def _update_height(self, *_):
         if hasattr(self, "bubble_stack"):
-            self.height = self.bubble_stack.height + dp(6)
+            if self._wide_attachment:
+                self.body_row.height = self.bubble_stack.height + dp(2)
+            else:
+                self.height = self.bubble_stack.height + dp(6)
 
     def add_reply_actions(self, actions):
-        self.bubble_stack.add_widget(actions)
+        container = self if self._wide_attachment else self.bubble_stack
+        container.add_widget(actions)
+
+    def _body_font_size(self):
+        return F("body") * (.98 if self._jade_mobile else 1)
 
     def set_text(self, text, force_update=True):
         self.text = text or ""
-        formatted, self._markdown_links = render_markdown(self.text, F("body"), code_blocks=self._markdown_code)
+        body_size = self._body_font_size()
+        formatted, self._markdown_links = render_markdown(self.text, body_size, code_blocks=self._markdown_code)
         self._stream_markdown_prefix = formatted
         self._stream_markdown_prefix_len = len(self.text)
         self.body.font_name = font_path()
-        self.body.font_size = F("body")
+        self.body.font_size = body_size
         self.body.bold = STATE.get("font_weight") == "bold"
         self.body.text = formatted
         if force_update:
@@ -3601,8 +3619,9 @@ class MessageBubble(BoxLayout):
         if not piece:
             return
         self.text += str(piece)
+        body_size = self._body_font_size()
         self.body.font_name = font_path()
-        self.body.font_size = F("body")
+        self.body.font_size = body_size
         self.body.bold = STATE.get("font_weight") == "bold"
 
         # Only commit a prefix at a line/word boundary. Already displayed paragraphs then
@@ -3619,7 +3638,7 @@ class MessageBubble(BoxLayout):
             if stable_end > self._stream_markdown_prefix_len:
                 prefix = self.text[:stable_end]
                 self._stream_markdown_prefix, self._markdown_links = render_markdown(
-                    prefix, F("body"), code_blocks=self._markdown_code)
+                    prefix, body_size, code_blocks=self._markdown_code)
                 self._stream_markdown_prefix_len = stable_end
                 self._stream_markdown_refresh_at = now
 
@@ -4051,7 +4070,10 @@ class ChatRoot(BoxLayout):
             self.composer_mic_button = IconAction("", "mic", self.voice_click, self._nav_color)
             composer.add_widget(self.composer_mic_button)
         self.action_slot = BoxLayout(size_hint=(None, None), size=(dp(45), dp(44)))
-        send_color = lambda key: T("send") if key == "accent" and STATE["theme"] == "aurora" else self._nav_color(key)
+        def send_color(key):
+            if key == "accent" and STATE["theme"] == "aurora" and not jade_mobile():
+                return T("send")
+            return self._nav_color(key)
         self.send_button = IconAction("", "send_jade" if jade_mobile() else "send", self._press_send, send_color,
                                         variant="solid",
                                         size_hint=(1, 1), radius=23,
@@ -5254,7 +5276,7 @@ class ChatRoot(BoxLayout):
                                     "Инструменты и данные приложения", grouped=True)
         profile.height = dp(76 if mobile_glass else 72)
         if STATE["theme"] == "aurora":
-            panel(profile, T("profile_glass"), (*T("accent")[:3], .40), 18, luminous=True,
+            panel(profile, T("profile_glass"), (*T("accent")[:3], .22 if mobile_glass else .40), 18, luminous=True,
                   material="profile" if mobile_glass else None)
         else:
             surface(profile, T("panel"), T("panel3"), 18)

@@ -574,8 +574,10 @@ class Glyph(Widget):
                 circle(10, 14, 6)
                 path((14.4, 9.4), (20, 4))
             elif name == "copy":
-                rect(8, 7, 12, 13, 2)
-                path((15, 4), (5, 4), (4, 5), (4, 15))
+                rect(8.5, 6.8, 12, 13.9, 2.3)
+                curve((16.6, 3.6), ((12, 3.6), (8.7, 3.6), (6.2, 3.6)),
+                      ((4.7, 3.6), (3.7, 4.7), (3.7, 6.2)),
+                      ((3.7, 9.5), (3.7, 12.4), (3.7, 15.9)))
             elif name == "bookmark":
                 path((6, 3), (6, 19), (8, 21), (16, 21), (18, 19), (18, 3),
                      (12, 7), (6, 3))
@@ -583,8 +585,13 @@ class Glyph(Widget):
                 Line(circle=(x(12), y(12), 7.6 * unit, 40, 309), width=stroke, cap="round")
                 path((19.5, 20), (19.5, 14.5), (14, 14.5))
             elif name == "folder":
-                path((3, 17), (9, 17), (11, 15), (19, 15), (21, 13), (21, 6),
-                     (19, 4), (5, 4), (3, 6), (3, 17))
+                path((3, 16.1), (3, 19.5), (8.8, 19.5), (11, 16.9), (18, 16.9))
+                curve((18, 16.9), ((20.2, 16.9), (21.1, 16.2), (21.1, 14.5)),
+                      ((21.1, 12), (21.1, 9.8), (21.1, 7.3)),
+                      ((21.1, 5.5), (20.3, 4.8), (18.5, 4.8)),
+                      ((14, 4.8), (10, 4.8), (5.6, 4.8)),
+                      ((4, 4.8), (3, 5.6), (3, 7.3)),
+                      ((3, 10.1), (3, 13.2), (3, 16.1)))
             elif name == "book":
                 path((12, 5), (8, 8), (3, 8), (3, 19), (8, 19), (12, 16),
                      (16, 19), (21, 19), (21, 8), (16, 8), (12, 5), (12, 16))
@@ -653,9 +660,12 @@ class Glyph(Widget):
                         circle(px, py, .8, True)
                 path((9, 8), (15, 8))
             elif name == "bell":
-                path((3, 6), (6, 10), (6, 15), (8, 19), (12, 21), (16, 19), (18, 15),
-                     (18, 10), (21, 6), (3, 6))
-                path((9, 4), (10, 2), (14, 2), (15, 4))
+                curve((3.5, 6), ((5.4, 8.3), (6.3, 9.8), (6.3, 13.9)),
+                      ((6.3, 17.5), (8.5, 20.1), (12, 20.1)),
+                      ((15.5, 20.1), (17.7, 17.5), (17.7, 13.9)),
+                      ((17.7, 9.8), (18.6, 8.3), (20.5, 6)))
+                path((3.5, 6), (20.5, 6))
+                curve((9.2, 3.8), ((10, 1.7), (14, 1.7), (14.8, 3.8)))
             elif name == "type":
                 path((2, 6), (6, 16), (10, 6))
                 path((3.5, 10), (8.5, 10))
@@ -704,7 +714,7 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=Fal
         canvas = background
     with canvas:
         diffusion = None
-        if material in ("lit", "shortcut", "profile"):
+        if material in ("lit", "shortcut"):
             Color(1, 1, 1, 1)
             diffusion = Mesh(mode="triangle_strip", texture=halo_film(material == "shortcut"),
                              indices=list(range(74)))
@@ -747,9 +757,9 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=Fal
         if material and artwork is not None:
             artwork.pos, artwork.size, artwork.radius = pos, size, [corner]
         if bevel is not None and min(size) > 0:
-            bevel.vertices = _bevel_vertices(pos, size, corner, dp(1.55 if material == "lit" else 1.15))
+            bevel.vertices = _bevel_vertices(pos, size, corner, dp(1.35 if material == "lit" else 1.15))
         if diffusion is not None and min(size) > 0:
-            diffusion.vertices = _bevel_vertices(pos, size, corner, dp(16 if material == "lit" else 7), outside=True)
+            diffusion.vertices = _bevel_vertices(pos, size, corner, dp(12 if material == "lit" else 7), outside=True)
         if border:
             border.rounded_rectangle = (*pos, *size, corner)
         for glow in aura:
