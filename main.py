@@ -93,7 +93,7 @@ from kivy.properties import NumericProperty
 from kivy.uix.screenmanager import NoTransition, Screen, ScreenManager
 from kivy.utils import platform as kivy_platform
 
-from aish_glass import liquid_backdrop
+from aish_glass import glass_film, liquid_backdrop
 from aish_mobile import (ASSETS, UI_FONT, IconAction, CardButton, ComposerInput, GlassArtwork,
                          GlassTextButton, Glyph, NavButton, PALETTE, PressFeedback, ProgressDial,
                          hairline, jade_waves, panel,
@@ -3264,6 +3264,9 @@ class PremiumSwitch(PressFeedback, ButtonBehavior, Widget):
         with self._track:
             Color(*track)
             RoundedRectangle(pos=(x, y), size=(w, h), radius=[h / 2])
+            if jade_mobile():
+                Color(1, 1, 1, .26 + .66 * on)
+                RoundedRectangle(pos=(x, y), size=(w, h), radius=[h / 2], texture=glass_film("switch"))
             Color(*T("accent")[:3], .12 + .18 * on)
             Line(rounded_rectangle=(x, y, w, h, h / 2), width=dp(.55))
             knob = h - dp(5)
@@ -3273,6 +3276,9 @@ class PremiumSwitch(PressFeedback, ButtonBehavior, Widget):
             thumb = T("switch_thumb") if jade else (.96, .96, .98, 1)
             Color(*thumb)
             Ellipse(pos=(left, y + dp(2.5)), size=(knob, knob))
+            if jade_mobile():
+                Color(1, 1, 1, .96)
+                Ellipse(pos=(left, y + dp(2.5)), size=(knob, knob), texture=glass_film("thumb"))
 
     def on_release(self):
         self.set_active(not self.active, animate=True)
@@ -3443,7 +3449,7 @@ class MessageBubble(BoxLayout):
         self.bubble.bind(minimum_height=self.bubble.setter("height"))
         bg = T("bubble_me") if is_me else T("bubble_ai")
         tint = (*T("accent")[:3], .30) if self._eclipse and is_me else T("panel3")
-        material = ("emerald" if is_me else "frosted") if self._jade_mobile else None
+        material = ("emerald" if is_me else "answer") if self._jade_mobile else None
         surface(self.bubble, bg, tint, radius=18, material=material)
 
         self._user_mint = is_me and self._eclipse
@@ -4012,11 +4018,12 @@ class ChatRoot(BoxLayout):
         dock = BoxLayout(orientation="vertical", size_hint_y=None,
                          padding=(dp(16), dp(5), dp(16), dp(14)))
         composer = Widget(size_hint_y=None, height=dp(58))
-        _, self.composer_frame_color = panel(composer, (*T("panel")[:3], .78), T("panel3"), 28,
-                                             material="frosted" if jade_mobile() else None)
+        _, self.composer_frame_color = panel(composer, (*T("panel")[:3], .78),
+                                             (*T("divider")[:3], .45) if jade_mobile() else T("panel3"),
+                                             28, material="composer" if jade_mobile() else None)
         self.input = ComposerInput(
             self.send, hint_text="Сообщение для Aish", size_hint=(None, None),
-            height=dp(45), font_size=sp(16.5), foreground_color=T("text"),
+            height=dp(45), font_size=sp(14.7 if jade_mobile() else 16.5), foreground_color=T("text"),
             disabled_foreground_color=T("text"), cursor_color=T("accent"),
             hint_text_color=T("text_dim"), selection_color=(*T("accent")[:3], .24),
             background_normal="", background_active="", background_disabled_normal="",
@@ -4028,15 +4035,10 @@ class ChatRoot(BoxLayout):
                                    padding=(dp(7), dp(5), dp(5), dp(5)))
         surface(self.photo_row, T("panel"), T("panel3"), 13)
         composer.add_widget(self.photo_row)
-        self.composer_well = None
-        if jade_mobile():
-            self.composer_well = Widget()
-            surface(self.composer_well, T("panel"), T("divider"), 25, material="field")
-            composer.add_widget(self.composer_well)
         composer.add_widget(self.input)
         self.attach_button = IconAction("", "plus", self.open_composer_actions, self._nav_color,
                                           variant="outline", button_width=42 if jade_mobile() else 38,
-                                          radius=23, material="field" if jade_mobile() else None)
+                                          radius=23, material="control" if jade_mobile() else None)
         self.photo_button = IconAction("", "image", self.choose_photo, self._nav_color,
                                          button_width=39)
         self.composer_photo_button = IconAction("Фото", "image", self.choose_photo, self._nav_color,
@@ -4050,7 +4052,8 @@ class ChatRoot(BoxLayout):
             composer.add_widget(self.composer_mic_button)
         self.action_slot = BoxLayout(size_hint=(None, None), size=(dp(45), dp(44)))
         send_color = lambda key: T("send") if key == "accent" and STATE["theme"] == "aurora" else self._nav_color(key)
-        self.send_button = IconAction("", "send", self._press_send, send_color, variant="solid",
+        self.send_button = IconAction("", "send_jade" if jade_mobile() else "send", self._press_send, send_color,
+                                        variant="solid",
                                         size_hint=(1, 1), radius=23,
                                         material="mint" if jade_mobile() else None)
         self.stop_button = IconAction("", "stop", self.stop_generation, self._nav_color,
@@ -4066,8 +4069,9 @@ class ChatRoot(BoxLayout):
         self.chat_layout.add_widget(self.bottom_bar)
         self.navigation = BoxLayout(size_hint_y=None, height=dp(70),
                                     padding=(dp(9), dp(3), dp(9), dp(3)), spacing=dp(2))
-        surface(self.navigation, (*T("bg_bot")[:3], .91), T("divider") if jade_mobile() else T("panel3"),
-                radius=20, material="settings" if jade_mobile() else None)
+        surface(self.navigation, (*T("bg_bot")[:3], .74),
+                (*T("divider")[:3], .52) if jade_mobile() else T("panel3"),
+                radius=20, material="nav" if jade_mobile() else None)
         self.mobile_tabs = {}
         for key, label, icon, action in (
             ("chat", "Главная", "home", self.show_mobile_chat),
@@ -4214,8 +4218,8 @@ class ChatRoot(BoxLayout):
 
                 hero.bind(pos=place_wave, size=place_wave)
                 place_wave()
-                self._welcome_art = GlassArtwork(GLASS_ASSET, size_hint=(.83, .92),
-                                                  pos_hint={"center_x": .5, "center_y": .52})
+                self._welcome_art = GlassArtwork(GLASS_ASSET, size_hint=(.60, .88),
+                                                  pos_hint={"center_x": .54, "center_y": .51})
                 hero.add_widget(self._welcome_art)
                 page.add_widget(hero)
             else:
@@ -4252,13 +4256,14 @@ class ChatRoot(BoxLayout):
             choices.clear_widgets()
             for index, (label, icon, action) in enumerate(shortcuts[which]):
                 fill = (*T("panel")[:3], .74) if jade_mobile() else T("accent_soft" if not index else "panel")
-                rim = (*T("accent")[:3], .62) if not index and jade_mobile() else T("accent" if not index else "panel3")
-                material = ("lit" if not index else "frosted") if jade_mobile() else None
+                rim = (*T("accent")[:3], .53) if not index and jade_mobile() else T("accent" if not index else "panel3")
+                material = ("lit" if not index else "shortcut") if jade_mobile() else None
                 tile = CardButton(action, fill, rim, orientation="vertical",
                                   radius=21, spacing=dp(3), padding=(dp(4), dp(11), dp(4), dp(8)),
                                   luminous=not index and STATE["theme"] == "aurora", material=material)
-                tile.add_widget(Glyph(icon, T("accent" if not index else "chip_text"), icon_size=38))
-                tile.add_widget(make_label(label, 12, halign="center", size_hint_y=None, height=dp(39)))
+                tile.add_widget(Glyph(icon, T("accent" if not index else "chip_text"), icon_size=36))
+                tile.add_widget(make_label(label, 13 if jade_mobile() else 12, halign="center",
+                                           size_hint_y=None, height=dp(40)))
                 choices.add_widget(tile)
             for index, button in enumerate(indicators):
                 button.glyph.ink = T("accent" if index == which else "text_faint")
@@ -4629,7 +4634,7 @@ class ChatRoot(BoxLayout):
                                             size_hint=(None, 1), icon_size=17,
                                             radius=19,
                                             variant="solid" if icon == "volume" and not mobile_glass else "outline",
-                                            material=("lit" if icon == "volume" else "field") if mobile_glass else None))
+                                            material=("lit" if icon == "volume" else "control") if mobile_glass else None))
         actions.add_widget(Widget())
         if STATE["show_time"] and not mobile_glass:
             actions.add_widget(make_label(bubble.ts, 10, "text_faint", halign="right",
@@ -4733,7 +4738,7 @@ class ChatRoot(BoxLayout):
         if icon_badge:
             surface(glyph, T("accent_soft") if jade_mobile() else
                     T("history_badge") if history and STATE["theme"] == "aurora" else T("accent_soft"),
-                    radius=12, material="emerald" if jade_mobile() else None)
+                    radius=13, material="badge" if jade_mobile() else None)
         names = BoxLayout(orientation="vertical", spacing=dp(2))
         names.add_widget(make_label(label, 14, bold=not (history or grouped), shorten=True, shorten_from="right",
                                     size_hint_y=.57 if subtitle else 1))
@@ -4856,7 +4861,7 @@ class ChatRoot(BoxLayout):
                 item = BoxLayout(size_hint_y=None, height=dp(62))
                 fill = T("history_glass") if STATE["theme"] == "aurora" else T("panel")
                 surface(item, fill, T("divider") if jade_mobile() else T("panel3"), radius=18,
-                        material="frosted" if jade_mobile() else None)
+                        material="history" if jade_mobile() else None)
                 title = row["title"].casefold()
                 icon = next((symbol for prefix, symbol in (("генерац", "image"), ("анализ фото", "camera"),
                             ("анализ текст", "file"), ("иде", "studio"), ("программ", "code"))
@@ -5250,7 +5255,7 @@ class ChatRoot(BoxLayout):
         profile.height = dp(76 if mobile_glass else 72)
         if STATE["theme"] == "aurora":
             panel(profile, T("profile_glass"), (*T("accent")[:3], .40), 18, luminous=True,
-                  material="emerald" if mobile_glass else None)
+                  material="profile" if mobile_glass else None)
         else:
             surface(profile, T("panel"), T("panel3"), 18)
         profile.remove_widget(profile.children[-1])
@@ -5262,7 +5267,8 @@ class ChatRoot(BoxLayout):
         profile.add_widget(avatar, index=len(profile.children))
         page.add_widget(profile)
         main_settings = [
-            self._mobile_card("Модель нейросети", "sliders", lambda: self.open_model_picker(self.open_mobile_settings),
+            self._mobile_card("Модель нейросети", "gear" if mobile_glass else "sliders",
+                              lambda: self.open_model_picker(self.open_mobile_settings),
                               self._model_label(), grouped=True, icon_badge=False),
             self._mobile_card("Тема оформления", "palette", choose_theme,
                               "Тёмная (изумрудная)" if STATE["theme"] == "aurora" else TV("name"),
@@ -5437,7 +5443,8 @@ class ChatRoot(BoxLayout):
     def _input_focus_changed(self, _widget, focused):
         if focused and self.mobile_screens.current != "chat":
             self.show_mobile_chat()
-        self.composer_frame_color.rgba = (*T("accent")[:3], .52) if focused else T("panel3")
+        idle_rim = (*T("divider")[:3], .45) if jade_mobile() else T("panel3")
+        self.composer_frame_color.rgba = (*T("accent")[:3], .44) if focused else idle_rim
         self._refresh_bottom_layout()
 
     def _adapt_orientation(self, *_):
@@ -5613,8 +5620,8 @@ class ChatRoot(BoxLayout):
         self.bg_halo_2.ellipse = (self.x+width*0.32, self.top-dp(405), width*0.55, dp(220))
         for index, (_ink, ribbon) in enumerate(self._jade_ribbons):
             if jade_mobile():
-                ribbon.pos = (self.x, self.y - dp(5))
-                ribbon.size = (width, min(height * .26, width * .55))
+                ribbon.pos = (self.x, self.y)
+                ribbon.size = (width, min(height * .27, width * .363))
                 continue
             ribbon.pos = (self.x, self.y + height * (.36 if index == 0 else -.08))
             ribbon.size = (width, min(height * (.43 if index == 0 else .23), dp(460)))
@@ -5715,18 +5722,13 @@ class ChatRoot(BoxLayout):
             self.composer_mic_button.pos = ((frame.x + dp(121)) if expanded else (right - dp(99)), actions_y)
             self.composer_mic_button.opacity = int(show_mic)
             self.composer_mic_button.disabled = not show_mic
-        horizontal_offset = dp(15 if expanded else 49)
+        horizontal_offset = dp(15 if expanded else 58 if jade_mobile() else 49)
         right_offset = dp(15 if expanded else 103 if show_mic else 57)
         self.input.width = max(dp(40), frame.width - horizontal_offset - right_offset)
         input_y = frame.y + dp(52) if expanded else frame.center_y - self.input.height / 2
         self.input.pos = (frame.x + horizontal_offset, input_y)
-        self.input.hint_text = "Напиши сообщение…" if self.input.width >= dp(168) else "Сообщение…"
-        if self.composer_well is not None:
-            self.composer_well.opacity = 0 if expanded else 1
-            self.composer_well.pos = (frame.x + dp(46), frame.y + dp(2))
-            self.composer_well.size = (max(0, frame.width - dp(98 if show_mic else 94)), frame.height - dp(4))
-            self.input.x += dp(10) if not expanded else 0
-            self.input.width -= dp(8) if not expanded else 0
+        hint_threshold = dp(154 if jade_mobile() else 168)
+        self.input.hint_text = "Напиши сообщение…" if self.input.width >= hint_threshold else "Сообщение…"
         self.photo_row.pos = (frame.x + dp(10), top - self.photo_row.height - dp(8))
         self.photo_row.width = max(0, frame.width - dp(20))
 

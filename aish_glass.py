@@ -2,9 +2,14 @@
 
 from dataclasses import dataclass
 from functools import lru_cache
-from math import exp, sin
+from math import exp
+from pathlib import Path
 
+from kivy.core.image import Image as CoreImage
 from kivy.graphics.texture import Texture
+
+
+ASSETS = Path(__file__).resolve().parent / "assets"
 
 
 @dataclass(frozen=True)
@@ -17,12 +22,23 @@ class Material:
 
 
 MATERIALS = {
-    "frosted": Material((143, 203, 189), .28, .13, .10, .15),
-    "field": Material((162, 215, 202), .25, .17, .12, .20),
-    "emerald": Material((142, 245, 198), .40, .33, .29, .45),
-    "lit": Material((163, 255, 217), .54, .28, .48, .85),
-    "mint": Material((191, 255, 230), .12, .44, .06, .43),
-    "settings": Material((143, 203, 189), .21, .09, .12, .12),
+    "frosted": Material((139, 202, 183), .28, .15, .11, .13),
+    "field": Material((161, 212, 197), .20, .19, .17, .22),
+    "emerald": Material((130, 242, 190), .43, .36, .30, .39),
+    "lit": Material((144, 254, 200), .52, .39, .70, .84),
+    "mint": Material((169, 254, 222), .39, .70, .03, .36),
+    "settings": Material((137, 194, 177), .20, .082, .13, .11),
+    "shortcut": Material((154, 208, 193), .30, .20, .14, .19),
+    "history": Material((128, 205, 186), .22, .16, .13, .10),
+    "badge": Material((117, 248, 188), .40, .21, .43, .29),
+    "answer": Material((141, 217, 195), .24, .18, .16, .15),
+    "profile": Material((136, 245, 194), .38, .25, .39, .42),
+    "control": Material((160, 217, 199), .37, .21, .20, .22),
+    "nav": Material((136, 205, 182), .22, .15, .07, .10),
+    "nav-selected": Material((104, 238, 177), .36, .42, .06, .11),
+    "composer": Material((131, 189, 171), .28, .19, .21, .12),
+    "switch": Material((169, 249, 207), .36, .55, .04, .23),
+    "thumb": Material((235, 255, 248), .07, .72, .04, .29),
 }
 
 
@@ -40,14 +56,19 @@ def glass_film(name):
     pixels = bytearray()
     for row in range(height):
         y = row / (height - 1)
+        if name in ("mint", "switch", "thumb", "nav-selected"):
+            y = 1 - y
         for col in range(width):
             x = col / (width - 1)
-            shade = .32 + .68 * exp(-((y - .50) / .35) ** 2)
-            key = exp(-((y - 1) / .23) ** 2 - ((x - .14) / .65) ** 2)
-            bounce = exp(-(y / .23) ** 2 - ((x - .82) / .61) ** 2)
-            side = exp(-(x / .075) ** 2) * exp(-((y - .48) / .47) ** 2)
+            shade = .22 + .78 * exp(-((y - .44) / .33) ** 2 - ((x - .56) / .64) ** 2)
+            key = exp(-((y - 1.03 + .067 * x) / .20) ** 2 - ((x - .16) / .77) ** 2)
+            focus = .42 if name in ("lit", "badge") else .83
+            bounce = exp(-(y / .19) ** 2 - ((x - focus) / .62) ** 2)
+            side = exp(-(x / .079) ** 2) * exp(-((y - .53) / .49) ** 2)
             reflection = material.top_light * key + material.lower_light * bounce
-            reflection += .20 * material.lower_light * side
+            reflection += .29 * material.lower_light * side
+            reflection += material.top_light * .13 * exp(-((y - .81 + .24 * x) / .12) ** 2)
+            reflection = min(.87, reflection)
             tint = material.deep_green * shade
             alpha = tint + reflection * (1 - tint)
             rgb = tuple(round((dark * tint + light * reflection * (1 - tint)) / alpha)
@@ -74,36 +95,21 @@ def edge_film(name):
 
 
 @lru_cache(maxsize=2)
-def liquid_backdrop(footer=False):
-    """Model the folded glass ribbons behind the home emblem and settings."""
-    width, height = 480, 224
+def halo_film(shadow=False):
     pixels = bytearray()
-    for row in range(height):
-        y = row / (height - 1)
-        for col in range(width):
-            x = col / (width - 1)
-            if footer:
-                crest = .03 + .47 * x + .24 * sin(4.8 * x - .41)
-                thickness = .13 + .10 * sin(3.2 * x)
-                upper = crest + thickness
-                focus = .29 + .71 * exp(-((x - .50) / .40) ** 2)
-                light = .45
-            else:
-                crest = .28 + .105 * sin(7.7 * x - .21) + .078 * x
-                thickness = .082 + .063 * sin(6.2 * x + .55) ** 2
-                upper = crest + thickness
-                focus = .26 + .74 * (exp(-((x - .08) / .20) ** 2) + .70 * exp(-((x - .90) / .16) ** 2))
-                light = .61
-            body = exp(-((y - (crest + thickness * .26)) / (thickness * .81)) ** 2)
-            edge = exp(-((y - crest) / (.009 + .004 * x)) ** 2)
-            inner = exp(-((y - upper) / .019) ** 2)
-            spill = exp(-((y - crest - .025) / .115) ** 2)
-            rear = exp(-((y - (.64 + .25 * sin(3.4 * x - .47))) / .065) ** 2)
-            rear *= exp(-((x - .69) / .39) ** 2)
-            alpha = (.56 * body + .31 * edge + .16 * inner + .19 * spill) * focus
-            alpha += .18 * rear if not footer else 0
-            alpha *= min(1, y * 9, (1 - y) * 8)
-            shine = min(1, (edge * .67 + inner * .36 + body * .16) * focus)
-            pixels.extend((round(21 + 140 * shine), round(102 + 143 * shine),
-                           round(80 + 119 * shine), round(min(1, alpha * (1 + light)) * 255)))
-    return texture_from_rgba(width, height, pixels)
+    for row in range(32):
+        height = row / 31
+        intensity = .46 + .54 * exp(-((height - .24) / .53) ** 2)
+        for column in range(64):
+            distance = column / 63
+            shade = (1 - distance) ** 2.7
+            rgb = (0, 0, 0) if shadow else (57, 222, 155)
+            pixels.extend((*rgb, round((132 if shadow else 108) * shade * intensity)))
+    return texture_from_rgba(64, 32, pixels)
+
+
+@lru_cache(maxsize=2)
+def liquid_backdrop(footer=False):
+    """Load the transparent decorative ribbon independently of the UI."""
+    filename = "aish-settings-wave.png" if footer else "aish-home-wave.png"
+    return CoreImage(str(ASSETS / filename)).texture

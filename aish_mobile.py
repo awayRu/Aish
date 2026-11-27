@@ -20,7 +20,7 @@ from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 from kivy.utils import get_color_from_hex, platform
-from aish_glass import edge_film, glass_film
+from aish_glass import edge_film, glass_film, halo_film, liquid_backdrop
 
 
 ASSETS = Path(__file__).resolve().parent / "assets"
@@ -290,7 +290,11 @@ class GlassArtwork(Widget):
         super().__init__(**kwargs)
         image_path = Path(path)
         emblem = image_path.name == "aish-premium-symbol.png"
-        self.texture = _emblem_texture(image_path) if emblem else CoreImage(str(image_path)).texture
+        cutout = image_path.with_name("aish-emblem-cutout.png")
+        if emblem and cutout.is_file():
+            self.texture = _cutout_texture(cutout)
+        else:
+            self.texture = _emblem_texture(image_path) if emblem else CoreImage(str(image_path)).texture
         backdrop = PALETTE["bg_top"] if background is None else background
         rgb = tuple(round(channel * 255) for channel in backdrop[:3])
         self._fade = None if emblem else _artwork_fade(rgb)
@@ -359,6 +363,11 @@ class GlassArtwork(Widget):
             self.layout_art()
 
 
+@lru_cache(maxsize=1)
+def _cutout_texture(path):
+    return CoreImage(str(path), mipmap=True).texture
+
+
 class ComposerInput(TextInput):
     """Desktop Enter submits. Shift+Enter and mobile IMEs can insert new lines."""
     def __init__(self, on_send, **kwargs):
@@ -389,7 +398,7 @@ class Glyph(Widget):
         unit = size / 24
         left = self.x + (self.width - size) / 2
         bottom = self.y + (self.height - size) / 2
-        stroke = min(dp(1.15), max(dp(.82), unit * 1.02))
+        stroke = min(dp(1.02), max(dp(.75), unit * .89))
 
         def x(value):
             return left + value * unit
@@ -400,6 +409,17 @@ class Glyph(Widget):
         def path(*points):
             vertices = [value for px, py in points for value in (x(px), y(py))]
             Line(points=vertices, width=stroke, joint="round", cap="round")
+
+        def curve(start, *segments):
+            points = [start]
+            for first, second, end in segments:
+                origin = points[-1]
+                for step in range(1, 13):
+                    t = step / 12
+                    u = 1 - t
+                    points.append(tuple(u ** 3 * a + 3 * u * u * t * b + 3 * u * t * t * c + t ** 3 * d
+                                        for a, b, c, d in zip(origin, first, second, end)))
+            path(*points)
 
         def rect(px, py, width, height, radius=2):
             Line(rounded_rectangle=(x(px), y(py), width * unit, height * unit, radius * unit),
@@ -423,8 +443,9 @@ class Glyph(Widget):
                 for level in (6, 12, 18):
                     path((3, level), (21, level))
             elif name == "home":
-                path((2, 11), (12, 21), (22, 11))
-                path((5, 13), (5, 3), (10, 3), (10, 9), (14, 9), (14, 3), (19, 3), (19, 13))
+                path((2.4, 11.3), (12, 20.7), (21.6, 11.3))
+                path((5.3, 13.7), (5.3, 3.5), (9.7, 3.5), (9.7, 9.6),
+                     (14.3, 9.6), (14.3, 3.5), (18.7, 3.5), (18.7, 13.7))
             elif name == "home_active":
                 Triangle(points=(x(1.5), y(11), x(12), y(21.5), x(22.5), y(11)))
                 Rectangle(pos=(x(5), y(9)), size=(14 * unit, 2.5 * unit))
@@ -436,9 +457,13 @@ class Glyph(Widget):
             elif name == "dot":
                 circle(12, 12, 5, filled=True)
             elif name == "camera":
-                path((5, 17), (8, 17), (10, 20), (15, 20), (17, 17), (20, 17),
-                     (22, 15), (22, 5), (20, 3), (4, 3), (2, 5), (2, 15), (4, 17), (5, 17))
-                circle(12, 10, 4)
+                curve((5, 17), ((2, 17), (2, 15.6), (2, 14)), ((2, 10), (2, 8), (2, 6.5)),
+                      ((2, 4.6), (3, 3.6), (4.8, 3.6)), ((8, 3.6), (16, 3.6), (19.2, 3.6)),
+                      ((21, 3.6), (22, 4.6), (22, 6.5)), ((22, 9.5), (22, 11), (22, 14)),
+                      ((22, 16), (21, 17), (19.2, 17)))
+                path((5, 17), (7.8, 17), (9.8, 20.1), (14.4, 20.1), (16.4, 17), (19.2, 17))
+                circle(12, 10.4, 4.0)
+                circle(18.7, 14.3, .55, True)
             elif name == "trash":
                 path((3, 18), (21, 18))
                 path((9, 18), (9, 21), (15, 21), (15, 18))
@@ -459,10 +484,14 @@ class Glyph(Widget):
                      (6, 3), (3, 5), (3, 8), (14, 19))
                 path((8, 13), (6, 9), (7, 7), (9, 7), (16, 14))
             elif name in ("chat", "message"):
-                path((4, 8), (3, 9), (3, 18), (5, 20), (19, 20), (21, 18), (21, 9),
-                     (19, 7), (10, 7), (5, 4), (5, 8), (4, 8))
-                for px in (7, 12, 17):
-                    circle(px, 13.5, .9, True)
+                curve((5.2, 8.0), ((2.8, 8.5), (2.6, 10), (2.6, 12.5)),
+                      ((2.6, 17.6), (3.1, 20.1), (6.5, 20.1)),
+                      ((9.3, 20.3), (14.7, 20.3), (17.5, 20.1)),
+                      ((21, 20.1), (21.4, 17.8), (21.4, 13.2)),
+                      ((21.4, 9.7), (20.4, 7.3), (17, 7.3)))
+                path((17, 7.3), (10, 7.3), (5.2, 3.8), (5.2, 8))
+                for px in (7.3, 12, 16.7):
+                    circle(px, 13.7, .82, True)
             elif name == "chat_active":
                 RoundedRectangle(pos=(x(2), y(6)), size=(20 * unit, 15 * unit), radius=[4 * unit])
                 Triangle(points=(x(6), y(7), x(11), y(7), x(6), y(2)))
@@ -508,8 +537,20 @@ class Glyph(Widget):
                 path((18, 6), (6, 18))
             elif name == "image":
                 rect(3, 3, 18, 18, 3)
-                circle(9, 16, 1.5)
-                path((4, 7), (8, 11), (12, 7), (17, 12), (20, 9))
+                circle(8.1, 15.8, 1.25)
+                path((3.7, 7), (8.7, 11.6), (12.3, 8.5), (16.6, 13.2), (20.4, 9.4))
+            elif name == "gear":
+                points = []
+                for index in range(8):
+                    for offset, radius in ((-.43, 8.1), (-.27, 8.1), (-.21, 10), (.21, 10), (.27, 8.1), (.43, 8.1)):
+                        angle = (index + offset) * pi / 4
+                        points.append((12 + radius * cos(angle), 12 + radius * sin(angle)))
+                path(*points, points[0])
+                circle(12, 12, 3.5)
+            elif name == "send_jade":
+                Triangle(points=(x(4), y(5.5), x(19.6), y(12), x(6.3), y(10.3)))
+                Triangle(points=(x(4), y(18.5), x(19.6), y(12), x(6.3), y(13.7)))
+                path((4.5, 5.6), (19.6, 12), (4.5, 18.4))
             elif name == "send":
                 path((3, 13), (21, 21), (15, 3), (11, 10), (3, 13))
                 path((11, 10), (21, 21))
@@ -628,12 +669,14 @@ class Glyph(Widget):
                 path((4, 16), (20, 16), (16, 20))
                 path((20, 8), (4, 8), (8, 4))
             elif name == "mic":
-                rect(9, 9, 6, 12, 3)
-                path((5, 12), (5, 9), (8, 6), (16, 6), (19, 9), (19, 12))
-                path((12, 6), (12, 3))
+                rect(9, 8.5, 6, 12.9, 3)
+                curve((5.7, 12), ((5.7, 7.4), (8, 5.8), (12, 5.8)),
+                      ((16, 5.8), (18.3, 7.4), (18.3, 12)))
+                path((12, 5.8), (12, 2.5))
+                path((9, 2.5), (15, 2.5))
 
 
-def _bevel_vertices(pos, size, corner, width):
+def _bevel_vertices(pos, size, corner, width, outside=False):
     x, y = pos
     w, h = size
     centers = ((w - corner, corner), (w - corner, h - corner),
@@ -642,9 +685,11 @@ def _bevel_vertices(pos, size, corner, width):
     for index, (cx, cy) in enumerate(centers):
         for sample in range(9):
             angle = (index - 1 + sample / 8) * pi / 2
-            for radius in (corner, max(0, corner - width)):
+            radii = (corner + width, corner) if outside else (corner, max(0, corner - width))
+            for ring, radius in enumerate(radii):
                 dx, dy = cx + cos(angle) * radius, cy + sin(angle) * radius
-                vertices += [x + dx, y + dy, dx / w, dy / h]
+                u, v = (1. - ring, max(0, min(1, dy / h))) if outside else (dx / w, dy / h)
+                vertices.extend((x + dx, y + dy, u, v))
     return vertices + vertices[:8]
 
 
@@ -658,6 +703,11 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=Fal
         canvas.insert(0, background)
         canvas = background
     with canvas:
+        diffusion = None
+        if material in ("lit", "shortcut", "profile"):
+            Color(1, 1, 1, 1)
+            diffusion = Mesh(mode="triangle_strip", texture=halo_film(material == "shortcut"),
+                             indices=list(range(74)))
         fill = Color(*color)
         body = RoundedRectangle(radius=[dp(radius)])
         glare = None
@@ -666,6 +716,12 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=Fal
         if material:
             Color(1, 1, 1, 1)
             glare = RoundedRectangle(texture=glass_film(material))
+            if material == "profile":
+                Color(1, 1, 1, .56)
+                artwork = RoundedRectangle(texture=liquid_backdrop(True))
+                Color(1, 1, 1, 1)
+            else:
+                artwork = None
             bevel = Mesh(mode="triangle_strip", texture=edge_film(material),
                          indices=list(range(74)))
         elif luminous:
@@ -688,8 +744,12 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=Fal
         body.radius = [corner]
         if glare is not None:
             glare.pos, glare.size, glare.radius = pos, size, [corner]
+        if material and artwork is not None:
+            artwork.pos, artwork.size, artwork.radius = pos, size, [corner]
         if bevel is not None and min(size) > 0:
             bevel.vertices = _bevel_vertices(pos, size, corner, dp(1.55 if material == "lit" else 1.15))
+        if diffusion is not None and min(size) > 0:
+            diffusion.vertices = _bevel_vertices(pos, size, corner, dp(16 if material == "lit" else 7), outside=True)
         if border:
             border.rounded_rectangle = (*pos, *size, corner)
         for glow in aura:
@@ -820,17 +880,17 @@ class NavButton(PressFeedback, ButtonBehavior, BoxLayout):
         with self.canvas.before:
             self.selected_fill = Color(*tint("accent_soft")[:3], 0)
             self.selected_shape = RoundedRectangle(radius=[dp(15)])
-            self.selected_light = Color(*tint("accent")[:3], 0)
-            self.selected_reflection = RoundedRectangle(texture=glass_film("emerald") if glass else _glass_reflection(),
+            self.selected_light = Color(*(1, 1, 1) if glass else tint("accent")[:3], 0)
+            self.selected_reflection = RoundedRectangle(texture=glass_film("nav-selected") if glass else _glass_reflection(),
                                                         radius=[dp(15)])
         self.bind(pos=self.place, size=self.place, state=self._style,
                   selected_opacity=self._paint_selection)
         self.place()
 
     def place(self, *_):
-        width = min(dp(70), self.width)
-        position = (self.center_x - width / 2, self.y)
-        size = (width, self.height)
+        width = min(dp(70), self.width - dp(2) if self.glass else self.width)
+        position = (self.center_x - width / 2, self.y + (dp(4) if self.glass else 0))
+        size = (width, max(0, self.height - (dp(3) if self.glass else 0)))
         self.selected_shape.pos = self.selected_reflection.pos = position
         self.selected_shape.size = self.selected_reflection.size = size
 
@@ -843,7 +903,7 @@ class NavButton(PressFeedback, ButtonBehavior, BoxLayout):
 
     def _paint_selection(self, *_):
         self.selected_fill.a = self.selected_opacity
-        self.selected_light.a = self.selected_opacity * .73 if self.glass else self.selected_opacity * .25
+        self.selected_light.a = self.selected_opacity * 1.42 if self.glass else self.selected_opacity * .25
 
     def set_active(self, active):
         if self.active == active:
