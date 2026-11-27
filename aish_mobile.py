@@ -8,7 +8,7 @@ from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
 from kivy.core.text import LabelBase
-from kivy.graphics import (Canvas, Color, Ellipse, Line, PopMatrix, PushMatrix,
+from kivy.graphics import (Canvas, Color, Ellipse, Line, Mesh, PopMatrix, PushMatrix,
                            Rectangle, RoundedRectangle, Scale, Triangle)
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
@@ -20,6 +20,7 @@ from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 from kivy.utils import get_color_from_hex, platform
+from aish_glass import edge_film, glass_film
 
 
 ASSETS = Path(__file__).resolve().parent / "assets"
@@ -491,6 +492,14 @@ class Glyph(Widget):
                 path((9, 18), (15, 12), (9, 6))
             elif name == "down":
                 path((6, 15), (12, 9), (18, 15))
+            elif name == "download":
+                path((12, 21), (12, 8), (7, 13))
+                path((12, 8), (17, 13))
+                path((6, 4), (18, 4))
+            elif name == "expand":
+                for px, py, dx, dy in ((3, 3, 1, 1), (21, 3, -1, 1),
+                                      (3, 21, 1, -1), (21, 21, -1, -1)):
+                    path((px + 5 * dx, py), (px, py), (px, py + 5 * dy))
             elif name == "plus":
                 path((5, 12), (19, 12))
                 path((12, 5), (12, 19))
@@ -624,7 +633,22 @@ class Glyph(Widget):
                 path((12, 6), (12, 3))
 
 
-def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=False):
+def _bevel_vertices(pos, size, corner, width):
+    x, y = pos
+    w, h = size
+    centers = ((w - corner, corner), (w - corner, h - corner),
+               (corner, h - corner), (corner, corner))
+    vertices = []
+    for index, (cx, cy) in enumerate(centers):
+        for sample in range(9):
+            angle = (index - 1 + sample / 8) * pi / 2
+            for radius in (corner, max(0, corner - width)):
+                dx, dy = cx + cos(angle) * radius, cy + sin(angle) * radius
+                vertices += [x + dx, y + dy, dx / w, dy / h]
+    return vertices + vertices[:8]
+
+
+def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=False, material=None):
     """Attach a rounded surface and return its mutable fill color and outline."""
     canvas = widget.canvas.before
     if isinstance(widget, TextInput):
@@ -638,11 +662,17 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=Fal
         body = RoundedRectangle(radius=[dp(radius)])
         glare = None
         aura = []
-        if luminous:
+        bevel = None
+        if material:
+            Color(1, 1, 1, 1)
+            glare = RoundedRectangle(texture=glass_film(material))
+            bevel = Mesh(mode="triangle_strip", texture=edge_film(material),
+                         indices=list(range(74)))
+        elif luminous:
             for width, alpha in ((6, .035), (4, .08), (2, .16)):
                 Color(*MINT_LIGHT[:3], alpha)
                 aura.append(Line(width=dp(width)))
-        if glass or (color[3] and (rim or color in PALETTE.values())):
+        if not material and (glass or (color[3] and (rim or color in PALETTE.values()))):
             alpha = .30 if luminous else .13
             Color(*MINT_LIGHT[:3], alpha)
             glare = RoundedRectangle(texture=_glass_reflection())
@@ -658,6 +688,8 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=Fal
         body.radius = [corner]
         if glare is not None:
             glare.pos, glare.size, glare.radius = pos, size, [corner]
+        if bevel is not None and min(size) > 0:
+            bevel.vertices = _bevel_vertices(pos, size, corner, dp(1.55 if material == "lit" else 1.15))
         if border:
             border.rounded_rectangle = (*pos, *size, corner)
         for glow in aura:
@@ -668,8 +700,8 @@ def panel(widget, color, rim=None, radius=14, inset=0, luminous=False, glass=Fal
     return fill, outline
 
 
-def surface(widget, color, rim=None, radius=14):
-    return panel(widget, color, rim, radius)
+def surface(widget, color, rim=None, radius=14, *, material=None):
+    return panel(widget, color, rim, radius, material=material)
 
 
 def hairline(widget, color, top=True, margin=0):
@@ -690,7 +722,7 @@ class IconAction(PressFeedback, ButtonBehavior, BoxLayout):
     text = StringProperty("")
 
     def __init__(self, text, icon, callback, tint, *, variant="quiet", button_width=44,
-                 button_height=44, icon_size=21, icon_last=False, radius=None, **kwargs):
+                 button_height=44, icon_size=21, icon_last=False, radius=None, material=None, **kwargs):
         kwargs.setdefault("size_hint", (None, None))
         kwargs.setdefault("orientation", "horizontal")
         kwargs.setdefault("spacing", dp(4))
@@ -717,7 +749,7 @@ class IconAction(PressFeedback, ButtonBehavior, BoxLayout):
         if radius is None:
             radius = 24 if variant == "pill" else 12
         self._fill, self._rim = panel(self, (0, 0, 0, 0), (0, 0, 0, 0), radius,
-                                      glass=variant in ("solid", "outline", "pill"))
+                                      glass=variant in ("solid", "outline", "pill"), material=material)
         self.bind(state=self._style, disabled=self._style, text=self._update_caption)
         self._style()
 
@@ -754,11 +786,11 @@ class IconAction(PressFeedback, ButtonBehavior, BoxLayout):
 
 
 class CardButton(PressFeedback, ButtonBehavior, BoxLayout):
-    def __init__(self, callback, color, border, radius=17, luminous=False, **kwargs):
+    def __init__(self, callback, color, border, radius=17, luminous=False, material=None, **kwargs):
         super().__init__(**kwargs)
         self.callback = callback
         self._base = color
-        self._fill, _ = panel(self, color, border, radius, luminous=luminous)
+        self._fill, _ = panel(self, color, border, radius, luminous=luminous, material=material)
         self.bind(state=self._style)
 
     def _style(self, *_):
@@ -773,13 +805,14 @@ class CardButton(PressFeedback, ButtonBehavior, BoxLayout):
 class NavButton(PressFeedback, ButtonBehavior, BoxLayout):
     selected_opacity = NumericProperty(0)
 
-    def __init__(self, title, icon, action, tint, **kwargs):
+    def __init__(self, title, icon, action, tint, *, glass=False, **kwargs):
         super().__init__(orientation="vertical", padding=(0, dp(4), 0, dp(9)), **kwargs)
         self.tint = tint
         self.action = action
         self.active = False
         self.icon = icon
-        self.glyph = Glyph(icon, tint("text_dim"), icon_size=22, size_hint_y=.60)
+        self.glass = glass
+        self.glyph = Glyph(icon, tint("text_dim"), icon_size=24 if glass else 22, size_hint_y=.60)
         self.caption = Label(text=title, font_name=UI_FONT, font_size=sp(10.5),
                              size_hint_y=.40, color=tint("text_dim"))
         self.add_widget(self.glyph)
@@ -788,7 +821,8 @@ class NavButton(PressFeedback, ButtonBehavior, BoxLayout):
             self.selected_fill = Color(*tint("accent_soft")[:3], 0)
             self.selected_shape = RoundedRectangle(radius=[dp(15)])
             self.selected_light = Color(*tint("accent")[:3], 0)
-            self.selected_reflection = RoundedRectangle(texture=_glass_reflection(), radius=[dp(15)])
+            self.selected_reflection = RoundedRectangle(texture=glass_film("emerald") if glass else _glass_reflection(),
+                                                        radius=[dp(15)])
         self.bind(pos=self.place, size=self.place, state=self._style,
                   selected_opacity=self._paint_selection)
         self.place()
@@ -809,7 +843,7 @@ class NavButton(PressFeedback, ButtonBehavior, BoxLayout):
 
     def _paint_selection(self, *_):
         self.selected_fill.a = self.selected_opacity
-        self.selected_light.a = self.selected_opacity * .25
+        self.selected_light.a = self.selected_opacity * .73 if self.glass else self.selected_opacity * .25
 
     def set_active(self, active):
         if self.active == active:
