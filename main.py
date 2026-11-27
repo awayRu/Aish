@@ -4240,7 +4240,7 @@ class ChatRoot(BoxLayout):
 
                 hero.bind(pos=place_wave, size=place_wave)
                 place_wave()
-                self._welcome_art = GlassArtwork(GLASS_ASSET, size_hint=(.60, .88),
+                self._welcome_art = GlassArtwork(GLASS_ASSET, home_emblem=True, size_hint=(.60, .88),
                                                   pos_hint={"center_x": .54, "center_y": .51})
                 hero.add_widget(self._welcome_art)
                 page.add_widget(hero)

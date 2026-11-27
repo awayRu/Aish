@@ -286,12 +286,16 @@ def _emblem_texture(path):
 class GlassArtwork(Widget):
     """Draw the reference's glass emblem without drawing the surrounding UI."""
 
-    def __init__(self, path, background=None, muted=False, zoom=1, **kwargs):
+    def __init__(self, path, background=None, muted=False, zoom=1, *, home_emblem=False, **kwargs):
         super().__init__(**kwargs)
         image_path = Path(path)
         emblem = image_path.name == "aish-premium-symbol.png"
         cutout = image_path.with_name("aish-emblem-cutout.png")
-        if emblem and cutout.is_file():
+        native = image_path.with_name("aish-home-emblem.png")
+        self._native_emblem = emblem and home_emblem and native.is_file()
+        if self._native_emblem:
+            self.texture = _cutout_texture(native)
+        elif emblem and cutout.is_file():
             self.texture = _cutout_texture(cutout)
         else:
             self.texture = _emblem_texture(image_path) if emblem else CoreImage(str(image_path)).texture
@@ -334,7 +338,10 @@ class GlassArtwork(Widget):
 
     def layout_art(self, *_):
         source_width, source_height = self._art_size
-        scale = min(self.width / source_width, self.height / source_height * self._zoom) * self._breath
+        scale = min(self.width / source_width, self.height / source_height * self._zoom)
+        if self._native_emblem:
+            scale = min(scale, 1)
+        scale *= self._breath
         width, height = source_width * scale, source_height * scale
         pos = (self.x + (self.width - width) / 2, self.y + (self.height - height) / 2)
         self.picture.pos, self.picture.size = pos, (width, height)
@@ -363,7 +370,7 @@ class GlassArtwork(Widget):
             self.layout_art()
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=2)
 def _cutout_texture(path):
     return CoreImage(str(path), mipmap=True).texture
 
