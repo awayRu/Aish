@@ -97,6 +97,28 @@ class StreamingTests(unittest.TestCase):
         with patch.object(main, "_model_response", return_value=Response([fragment("Часть"), fragment("лишнее")])):
             self.assertEqual(main._stream_request(None, lambda _text: cancel.set(), cancel), ("Часть", None))
 
+    def test_stop_finalizes_once_while_provider_is_still_blocked(self):
+        from unittest.mock import Mock
+
+        root = SimpleNamespace(
+            request_kind="chat", request_id="first", _request_session="original-chat",
+            busy=True, cancel_event=Event(), stream_bubble=None, _at_bottom=False,
+            _stream_display_buffer="partial reply", _pending_finish_payload=None,
+            _stream_display_event=Mock(), _flush_stream_pieces=Mock(),
+            _remove_typing=Mock(), add_message=Mock(),
+        )
+        root._set_busy = lambda value: setattr(root, "busy", value)
+        root._complete_ai_finish = lambda *args: main.ChatRoot._complete_ai_finish(root, *args)
+        cancel = root.cancel_event
+        with patch.object(main, "db_add", return_value=7) as store:
+            main.ChatRoot.stop_generation(root)
+            main.ChatRoot._finish_ai(root, "first", "late result", None, True)
+        self.assertTrue(cancel.is_set())
+        self.assertFalse(root.busy)
+        store.assert_called_once_with("assistant", "[прервано] partial reply", "original-chat")
+        root.add_message.assert_called_once_with("ai", "partial reply", msg_id=7,
+                                               interrupted=True, auto_scroll=False)
+
 
 if __name__ == "__main__":
     try:

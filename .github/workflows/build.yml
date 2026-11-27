@@ -286,8 +286,12 @@ jobs:
           $files = @(Get-ChildItem bin -Filter 'Aish-v*-Windows-x64.exe')
           if ($files.Count -ne 1) { throw 'Expected one Windows x64 package' }
           python -c "import pefile,sys; assert pefile.PE(sys.argv[1], fast_load=True).FILE_HEADER.Machine == 0x8664" $files[0].FullName
-          $asset = pyi-archive_viewer -l $files[0].FullName | Select-String 'assets[\\/]+aish-premium-symbol\.png'
-          if (-not $asset) { throw 'The Windows package is missing the original symbol' }
+          $listing = pyi-archive_viewer -l $files[0].FullName
+          foreach ($asset in @('aish-premium-symbol.png', 'aish-home-emblem.png', 'aish-home-wave.png', 'aish-settings-wave.png')) {
+            if (-not ($listing | Select-String ('assets[\\/]+' + [regex]::Escape($asset)))) {
+              throw "The Windows package is missing $asset"
+            }
+          }
       - uses: actions/upload-artifact@v7
         with:
           name: windows

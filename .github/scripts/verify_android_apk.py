@@ -42,7 +42,9 @@ def verify(apk_path):
                 for member in libraries:
                     verify_library(member.name, python.extractfile(member).read(), arch)
         with tarfile.open(fileobj=BytesIO(apk.read("assets/private.tar")), mode="r:*") as app:
-            for name in ("Inter-Regular.ttf", "Inter-Bold.ttf", "aish-premium-symbol.png", "wave-hand.png"):
+            for name in ("Inter-Regular.ttf", "Inter-Bold.ttf", "aish-premium-symbol.png",
+                         "aish-emblem-cutout.png", "aish-home-emblem.png", "aish-home-wave.png",
+                         "aish-settings-wave.png", "wave-hand.png"):
                 if app.extractfile(f"assets/{name}").read() != (Path("assets") / name).read_bytes():
                     raise ValueError(f"Bundled asset differs from source: {name}")
     print("Verified both ARM architectures, 16 KB ARM64 ELF alignment, WebP codecs, and UI assets.")
